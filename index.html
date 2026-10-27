@@ -105,6 +105,11 @@ td.z{color:#6b6965;font-weight:400}
 .line{padding:0 14px 10px;color:var(--mute);font-size:12.5px;min-height:1.9em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .opening{padding:0 14px;color:var(--mute);font-size:12px}
 .opening:empty{display:none}
+@keyframes pop{from{transform:scale(0)}60%{transform:scale(1.2)}to{transform:scale(1)}}
+@keyframes fade{from{opacity:0}to{opacity:.9}}
+.bd{animation:pop .28s .12s cubic-bezier(.2,.8,.3,1) both}
+#arrow g{animation:fade .25s .1s both}
+@media(prefers-reduced-motion:reduce){.bd,#arrow g{animation:none}}
 @media(max-width:860px){#review{grid-template-columns:1fr}.left{width:100%}}
 </style>
 </head>
@@ -369,20 +374,46 @@ function arrowSvg(uci, flip){
   return `<g fill="#96bc4b" stroke="#96bc4b" opacity=".9"><line x1="${a.x}" y1="${a.y}" x2="${bx}" y2="${by}" stroke-width=".17" stroke-linecap="round"/><polygon stroke="none" points="${b.x},${b.y} ${bx-uy*hw},${by+ux*hw} ${bx+uy*hw},${by-ux*hw}"/></g>`;
 }
 
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+function sqPos(sq){ const f="abcdefgh".indexOf(sq[0]), r=+sq[1]; return {c:S.flip?7-f:f, r:S.flip?r-1:8-r}; }
+function slide(to,from){
+  const el = $("board").querySelector(`[data-sq="${to}"] > img, [data-sq="${to}"] > .fbk`); if(!el) return;
+  const a = sqPos(from), b = sqPos(to);
+  el.style.zIndex = 6;
+  el.animate([{transform:`translate(${(a.c-b.c)*100}%,${(a.r-b.r)*100}%)`},{transform:"translate(0,0)"}],{duration:230,easing:"cubic-bezier(.25,.8,.25,1)"});
+}
+function animateMove(prev,idx){
+  if(REDUCED || prev===undefined || Math.abs(idx-prev)!==1) return;
+  const fwd = idx>prev, m = S.moves[fwd?prev:idx];
+  slide(fwd?m.to:m.from, fwd?m.from:m.to);
+  if(m.flags.includes("k")||m.flags.includes("q")){
+    const rank = m.color==="w"?"1":"8", ks = m.flags.includes("k"), rf = (ks?"h":"a")+rank, rt = (ks?"f":"d")+rank;
+    if(fwd) slide(rt,rf); else slide(rf,rt);
+  }
+  if(fwd && m.captured && !m.flags.includes("e")){
+    const sq = $("board").querySelector(`[data-sq="${m.to}"]`);
+    sq.insertAdjacentHTML("afterbegin", pimg(m.color==="w"?"b":"w", m.captured, 'class="ghost"'));
+    const g = sq.querySelector(".ghost"); g.style.zIndex = 0;
+    g.animate([{opacity:1},{opacity:0}],{duration:230,fill:"forwards"}).onfinish = () => g.remove();
+  }
+}
 function show(i){
+  const prev = S.shown;
   S.idx = Math.max(0,Math.min(S.fens.length-1,i));
+  S.shown = S.idx;
   const fen = S.fens[S.idx];
   const grid = fen.split(" ")[0].split("/").map(r=>{ const a=[]; for(const ch of r){ if(/\d/.test(ch)) for(let k=0;k<+ch;k++) a.push(null); else a.push(ch);} return a; });
   const mv = S.idx>0 ? S.moves[S.idx-1] : null, c = mv ? S.cls[S.idx-1] : null;
   let h = "";
   for(let r=0;r<8;r++) for(let f=0;f<8;f++){
     const rr = S.flip?7-r:r, ff = S.flip?7-f:f, sq = "abcdefgh"[ff]+(8-rr), p = grid[rr][ff];
-    h += `<div class="sq ${(rr+ff)%2===0?"l":"d"}${mv&&(sq===mv.from||sq===mv.to)?" hl":""}">` +
+    h += `<div class="sq ${(rr+ff)%2===0?"l":"d"}${mv&&(sq===mv.from||sq===mv.to)?" hl":""}" data-sq="${sq}">` +
       (f===0?`<i class="c r">${8-rr}</i>`:"") + (r===7?`<i class="c f">${"abcdefgh"[ff]}</i>`:"") +
       (p?pimg(p===p.toUpperCase()?"w":"b",p.toLowerCase()):"") +
       (mv&&sq===mv.to?`<span class="bd" style="background:${CLS[c].col}">${CLS[c].sym}</span>`:"") + `</div>`;
   }
   $("board").innerHTML = h;
+  animateMove(prev,S.idx);
   $("pTop").innerHTML = playerBar(S.flip?"w":"b",fen);
   $("pBot").innerHTML = playerBar(S.flip?"b":"w",fen);
 
