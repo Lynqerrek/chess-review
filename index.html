@@ -100,6 +100,11 @@ td.z{color:#6b6965;font-weight:400}
 .nav{display:flex;gap:8px;padding:12px 14px;background:var(--panel2)}
 .nav button{flex:1;background:#45423e;border:0;border-bottom:3px solid #2f2d2a;border-radius:6px;padding:8px;font-size:15px}
 .nav button:hover{background:#524f4a}
+.av{width:28px;height:28px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;flex:none}
+.mv img{width:17px;height:17px;vertical-align:-4px}
+.line{padding:0 14px 10px;color:var(--mute);font-size:12.5px;min-height:1.9em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.opening{padding:0 14px;color:var(--mute);font-size:12px}
+.opening:empty{display:none}
 @media(max-width:860px){#review{grid-template-columns:1fr}.left{width:100%}}
 </style>
 </head>
@@ -110,6 +115,7 @@ td.z{color:#6b6965;font-weight:400}
     <p>Upload a PGN and get every move rated, from brilliant to blunder.</p>
     <div id="drop"><b>Drop your .pgn file here</b>or <label><input type="file" id="file" accept=".pgn,.txt">choose a file</label></div>
     <textarea id="paste" placeholder="Or paste PGN text here"></textarea>
+    <select id="games" aria-label="Choose game" style="display:none;margin-top:12px;width:100%"></select>
     <div class="row">
       <select id="depth" aria-label="Engine depth">
         <option value="10">Depth 10 · fast</option>
@@ -136,13 +142,15 @@ td.z{color:#6b6965;font-weight:400}
     <div class="side">
       <div class="sh">Game Review <button class="btn" id="newgame">New game</button></div>
       <div class="acc" id="acc"></div>
+      <div class="opening" id="opening"></div>
       <div class="coach" id="coach"></div>
+      <div class="line" id="line"></div>
       <svg id="graph" viewBox="0 0 300 64" preserveAspectRatio="none"></svg>
       <table id="summary"></table>
       <div id="moves"></div>
       <div class="nav">
         <button id="first" title="Start">⏮</button><button id="prev" title="Back (←)">◀</button>
-        <button id="next" title="Forward (→)">▶</button><button id="last" title="End">⏭</button>
+        <button id="next" title="Forward (→)">▶</button><button id="play" title="Auto-play">▷</button><button id="last" title="End">⏭</button>
         <button id="flip" title="Flip board">⇅</button>
       </div>
     </div>
@@ -161,6 +169,7 @@ const CLS = {
   good:{label:"Good",sym:"✓",col:"var(--good)",is:"a good move"},
   inaccuracy:{label:"Inaccuracy",sym:"?!",col:"var(--inaccuracy)",is:"an inaccuracy"},
   mistake:{label:"Mistake",sym:"?",col:"var(--mistake)",is:"a mistake"},
+  miss:{label:"Miss",sym:"✕",col:"#ff7769",is:"a miss"},
   blunder:{label:"Blunder",sym:"??",col:"var(--blunder)",is:"a blunder"}
 };
 const ORDER = Object.keys(CLS);
@@ -201,9 +210,9 @@ function evalPos(fen,depth){
         const m = t.match(/score (cp|mate) (-?\d+)/); if(!m) return;
         let v = +m[2];
         if(m[1]==="mate") v = Math.sign(v)*(10000-Math.abs(v)*10);
-        lines[mp] = {cp:v*sign, mv:t.match(/ pv (\S+)/)[1]};
+        const pv = t.split(" pv ")[1].trim().split(" "); lines[mp] = {cp:v*sign, mv:pv[0], pv};
       } else if(t.startsWith("bestmove")){
-        res({cp: lines[1]?lines[1].cp:0, best: lines[1]?lines[1].mv:t.split(" ")[1], cp2: lines[2]?lines[2].cp:null});
+        res({cp: lines[1]?lines[1].cp:0, best: lines[1]?lines[1].mv:t.split(" ")[1], cp2: lines[2]?lines[2].cp:null, pv: lines[1]?lines[1].pv:[]});
       }
     };
     worker.postMessage("position fen "+fen);
@@ -245,6 +254,7 @@ function classifyAll(){
     else if(loss<10) c="inaccuracy";
     else if(loss<20) c="mistake";
     else c="blunder";
+    if(i>0 && S.loss[i-1]>=10 && loss>=5 && (c==="inaccuracy"||c==="mistake")) c="miss";
     if(c==="best"||c==="excellent"){
       if(winA>=45 && winB<92 && isSacrifice(fens[i],mv)) c="brilliant";
       else if(isBest && ev[i].cp2!==null && winB-win(m*ev[i].cp2)>=12 && winB<90) c="great";
@@ -263,7 +273,7 @@ function progress(p){ $("bar").style.display = p===null?"none":"block"; if(p!==n
 
 async function analyze(){
   const token = ++run;
-  const pgn = $("paste").value.trim();
+  const pgn = (splitGames($("paste").value)[+$("games").value||0]||"").trim();
   if(!pgn){ status("Add a PGN file or paste PGN text first.",true); return; }
   const g = new Chess();
   if(!g.load_pgn(pgn,{sloppy:true})){ status("Couldn't read that PGN. Check that it contains a valid game.",true); return; }
@@ -283,7 +293,7 @@ async function analyze(){
     status(`Reviewing position ${i+1} of ${fens.length}…`); progress((i+1)/fens.length);
   }
   S = {fens,moves:hist,ev,cls:[],loss:[],idx:0,flip:false,acc:{w:0,b:0},
-       name:{w:hdr.White||"White",b:hdr.Black||"Black"}, elo:{w:hdr.WhiteElo||"",b:hdr.BlackElo||""}};
+       opening:hdr.Opening||"", name:{w:hdr.White||"White",b:hdr.Black||"Black"}, elo:{w:hdr.WhiteElo||"",b:hdr.BlackElo||""}};
   classifyAll();
   $("load").hidden = true; $("review").hidden = false;
   buildSummary(); buildMoves(); buildGraph(); show(0);
@@ -304,12 +314,13 @@ function buildSummary(){
     const cell = n => `<td class="n${n?"":" z"}" ${n?`style="color:${CLS[k].col}"`:""}>${n}</td>`;
     return `<tr><td>${ic(k)}${CLS[k].label}</td>${cell(cnt.w[k])}${cell(cnt.b[k])}</tr>`;
   }).join("");
+  $("opening").textContent = S.opening||"";
   $("acc").innerHTML = `<div class="aw"><small>${esc(S.name.w)}</small><b>${S.acc.w.toFixed(1)}</b></div><div class="ab"><small>${esc(S.name.b)}</small><b>${S.acc.b.toFixed(1)}</b></div>`;
 }
 function buildMoves(){
   let h = "";
   for(let i=0;i<S.moves.length;i+=2){
-    const cell = j => j<S.moves.length ? `<div class="mv" data-i="${j+1}">${ic(S.cls[j])}${esc(S.moves[j].san)}</div>` : "<div></div>";
+    const cell = j => j<S.moves.length ? `<div class="mv" data-i="${j+1}">${ic(S.cls[j])}${fig(S.moves[j].san,S.moves[j].color)}</div>` : "<div></div>";
     h += `<div class="mrow"><div class="no">${i/2+1}</div>${cell(i)}${cell(i+1)}</div>`;
   }
   $("moves").innerHTML = h;
@@ -336,7 +347,7 @@ function playerBar(color, fen){
   ["q","r","b","n","p"].forEach(t=>{ for(let k=0;k<Math.max(0,START[t]-cnt[opp][t]);k++) caps += pimg(opp,t); });
   const diff = mat[color]-mat[opp];
   const elo = S.elo[color] ? ` <span class="pe">(${esc(S.elo[color])})</span>` : "";
-  return `<span>${esc(S.name[color])}</span>${elo}<span class="cap">${caps}</span>${diff>0?`<span class="md">+${diff}</span>`:""}`;
+  return `<span class="av" style="background:${color==="w"?"#8a8884":"#4a4845"}">${esc((S.name[color]||"?")[0].toUpperCase())}</span><span>${esc(S.name[color])}</span>${elo}<span class="cap">${caps}</span>${diff>0?`<span class="md">+${diff}</span>`:""}`;
 }
 
 function arrowSvg(uci, flip){
@@ -374,7 +385,7 @@ function show(i){
   let best = null, bestSan = "";
   if(mv){
     const before = S.ev[S.idx-1];
-    if(["inaccuracy","mistake","blunder"].includes(c) && before.best){
+    if(["inaccuracy","mistake","miss","blunder"].includes(c) && before.best){
       const t = new Chess(S.fens[S.idx-1]), bm = t.move({from:before.best.slice(0,2),to:before.best.slice(2,4),promotion:before.best[4]});
       if(bm){ best = before.best; bestSan = bm.san; }
     }
@@ -387,14 +398,41 @@ function show(i){
     const sub = best ? `Best was <b>${esc(bestSan)}</b>` : c==="brilliant" ? "A clever sacrifice that holds up." : c==="great" ? "The only move that keeps the position." : c==="best"?"The engine's top choice.":"";
     $("coach").innerHTML = `<span class="big" style="background:${CLS[c].col}">${CLS[c].sym}</span><div><div class="t">${esc(mv.san)} is ${CLS[c].is}</div><div class="s">${sub}</div></div><span class="pill">${fmt(e.cp)}</span>`;
   }
+  $("line").innerHTML = e.pv && e.pv.length ? `<b style="color:#fff">${fmt(e.cp)}</b>  ${esc(lineSan(fen,e.pv))}` : "";
   document.querySelectorAll(".mv").forEach(el=>el.classList.toggle("cur",+el.dataset.i===S.idx));
   const cur = document.querySelector(".mv.cur"); if(cur) cur.scrollIntoView({block:"nearest"});
   const cl = $("cur"); if(cl){ const x = S.idx/(S.fens.length-1)*300; cl.setAttribute("x1",x); cl.setAttribute("x2",x); }
 }
 
+function lineSan(fen,pv,n=6){
+  const c = new Chess(fen), out = []; let num = +fen.split(" ")[5]||1, white = c.turn()==="w";
+  for(const u of pv.slice(0,n)){
+    const m = c.move({from:u.slice(0,2),to:u.slice(2,4),promotion:u[4]}); if(!m) break;
+    out.push((white ? num+". " : (out.length?"":num+"... ")) + m.san);
+    if(!white) num++; white = !white;
+  }
+  return out.join(" ");
+}
+function fig(san,color){ const m = san.match(/^([KQRBN])(.*)$/); return m ? pimg(color,m[1].toLowerCase())+esc(m[2]) : esc(san); }
+function splitGames(t){ return t.trim().split(/\n\s*\n(?=\[Event )/).filter(x=>x.trim()); }
+function refreshGames(){
+  const gs = splitGames($("paste").value), sel = $("games");
+  if(gs.length<2){ sel.style.display="none"; sel.innerHTML=""; return; }
+  sel.innerHTML = gs.map((g,i)=>{ const w=(g.match(/\[White "([^"]*)"/)||[])[1]||"?", b=(g.match(/\[Black "([^"]*)"/)||[])[1]||"?"; return `<option value="${i}">Game ${i+1}: ${esc(w)} vs ${esc(b)}</option>`; }).join("");
+  sel.style.display = "block";
+}
+let timer = null;
+function togglePlay(){
+  if(timer){ clearInterval(timer); timer=null; $("play").textContent="▷"; return; }
+  if(S.idx>=S.fens.length-1) show(0);
+  $("play").textContent = "❚❚";
+  timer = setInterval(()=>{ if(S.idx>=S.fens.length-1){ togglePlay(); return; } show(S.idx+1); }, 900);
+}
+$("play").onclick = togglePlay;
+$("paste").oninput = refreshGames;
 /* ---------- events ---------- */
 $("go").onclick = analyze;
-$("newgame").onclick = () => { run++; $("review").hidden = true; $("load").hidden = false; $("paste").value = ""; status(""); };
+$("newgame").onclick = () => { if(timer) togglePlay(); run++; $("review").hidden = true; $("load").hidden = false; $("paste").value = ""; status(""); };
 $("first").onclick = ()=>show(0);
 $("prev").onclick = ()=>show(S.idx-1);
 $("next").onclick = ()=>show(S.idx+1);
@@ -412,7 +450,7 @@ document.addEventListener("keydown",e=>{
 function readFile(f){
   if(!f) return;
   const fr = new FileReader();
-  fr.onload = () => { $("paste").value = fr.result; analyze(); };
+  fr.onload = () => { $("paste").value = fr.result; refreshGames(); if(splitGames(fr.result).length>1) status("Several games found. Pick one, then press Start review."); else analyze(); };
   fr.readAsText(f);
 }
 $("file").onchange = e => readFile(e.target.files[0]);
