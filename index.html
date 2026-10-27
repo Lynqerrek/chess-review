@@ -118,6 +118,7 @@ td.z{color:#6b6965;font-weight:400}
     <select id="games" aria-label="Choose game" style="display:none;margin-top:12px;width:100%"></select>
     <div class="row">
       <select id="depth" aria-label="Engine depth">
+        <option value="8">Depth 8 · very fast</option>
         <option value="10">Depth 10 · fast</option>
         <option value="12" selected>Depth 12 · balanced</option>
         <option value="14">Depth 14 · thorough</option>
@@ -179,31 +180,36 @@ const START = {p:8,n:2,b:2,r:2,q:1};
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
-let worker = null, run = 0;
+let pool = [], sfSrc = null, run = 0;
 let S = {fens:[],moves:[],ev:[],cls:[],loss:[],idx:0,flip:false,acc:{w:0,b:0},name:{w:"White",b:"Black"},elo:{w:"",b:""}};
 
 /* ---------- engine ---------- */
 async function initEngine(){
-  if(worker) return;
-  const src = await (await fetch(SF_URL)).text();
-  worker = new Worker(URL.createObjectURL(new Blob([src],{type:"text/javascript"})));
-  await cmd("uci","uciok");
-  worker.postMessage("setoption name MultiPV value 2");
-  await cmd("isready","readyok");
+  pool.forEach(w=>w.terminate()); pool = [];
+  if(!sfSrc) sfSrc = await (await fetch(SF_URL)).text();
+  const url = URL.createObjectURL(new Blob([sfSrc],{type:"text/javascript"}));
+  const n = Math.max(1, Math.min(8, (navigator.hardwareConcurrency||4)-1));
+  const ws = Array.from({length:n},()=>new Worker(url));
+  await Promise.all(ws.map(async w=>{
+    await cmd(w,"uci","uciok");
+    w.postMessage("setoption name MultiPV value 2");
+    await cmd(w,"isready","readyok");
+  }));
+  pool = ws;
 }
-function cmd(c,until){
+function cmd(w,c,until){
   return new Promise(res=>{
-    worker.onmessage = e => { if(typeof e.data==="string" && e.data.startsWith(until)) res(); };
-    worker.postMessage(c);
+    w.onmessage = e => { if(typeof e.data==="string" && e.data.startsWith(until)) res(); };
+    w.postMessage(c);
   });
 }
-function evalPos(fen,depth){
+function evalPos(w,fen,depth){
   const c = new Chess(fen);
   if(c.game_over()) return Promise.resolve({cp: c.in_checkmate() ? (c.turn()==="w"?-10000:10000) : 0, best:null, cp2:null});
   const sign = c.turn()==="w" ? 1 : -1;
   return new Promise(res=>{
     const lines = {};
-    worker.onmessage = e => {
+    w.onmessage = e => {
       const t = typeof e.data==="string" ? e.data : "";
       if(t.startsWith("info") && t.includes(" pv ")){
         const mp = +((t.match(/multipv (\d+)/)||[0,1])[1]);
@@ -215,8 +221,8 @@ function evalPos(fen,depth){
         res({cp: lines[1]?lines[1].cp:0, best: lines[1]?lines[1].mv:t.split(" ")[1], cp2: lines[2]?lines[2].cp:null, pv: lines[1]?lines[1].pv:[]});
       }
     };
-    worker.postMessage("position fen "+fen);
-    worker.postMessage("go depth "+depth);
+    w.postMessage("position fen "+fen);
+    w.postMessage("go depth "+depth);
   });
 }
 
@@ -285,13 +291,18 @@ async function analyze(){
   $("go").disabled = true;
   try{ status("Loading Stockfish…"); progress(0); await initEngine(); }
   catch(e){ status("Couldn't load the engine. This page needs an internet connection to download Stockfish.",true); progress(null); $("go").disabled=false; return; }
-  worker.postMessage("ucinewgame");
-  const depth = +$("depth").value, ev = [];
-  for(let i=0;i<fens.length;i++){
-    if(token!==run) return;
-    ev.push(await evalPos(fens[i],depth));
-    status(`Reviewing position ${i+1} of ${fens.length}…`); progress((i+1)/fens.length);
-  }
+  if(token!==run) return;
+  const depth = +$("depth").value, ev = new Array(fens.length);
+  let next = 0, done = 0;
+  await Promise.all(pool.map(async w=>{
+    w.postMessage("ucinewgame");
+    while(token===run){
+      const i = next++; if(i>=fens.length) return;
+      ev[i] = await evalPos(w,fens[i],depth);
+      done++; status(`Reviewing position ${done} of ${fens.length} (${pool.length} engine threads)…`); progress(done/fens.length);
+    }
+  }));
+  if(token!==run) return;
   S = {fens,moves:hist,ev,cls:[],loss:[],idx:0,flip:false,acc:{w:0,b:0},
        opening:hdr.Opening||"", name:{w:hdr.White||"White",b:hdr.Black||"Black"}, elo:{w:hdr.WhiteElo||"",b:hdr.BlackElo||""}};
   classifyAll();
@@ -432,7 +443,7 @@ $("play").onclick = togglePlay;
 $("paste").oninput = refreshGames;
 /* ---------- events ---------- */
 $("go").onclick = analyze;
-$("newgame").onclick = () => { if(timer) togglePlay(); run++; $("review").hidden = true; $("load").hidden = false; $("paste").value = ""; status(""); };
+$("newgame").onclick = () => { if(timer) togglePlay(); run++; $("go").disabled=false; progress(null); $("review").hidden = true; $("load").hidden = false; $("paste").value = ""; status(""); };
 $("first").onclick = ()=>show(0);
 $("prev").onclick = ()=>show(S.idx-1);
 $("next").onclick = ()=>show(S.idx+1);
