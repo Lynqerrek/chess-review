@@ -232,7 +232,9 @@ function evalPos(w,fen,depth){
 }
 
 /* ---------- classification ---------- */
-const win = cp => 50 + 50*(2/(1+Math.exp(-0.00368208*Math.max(-3000,Math.min(3000,cp))))-1);
+const win = (cp,k=0.00368208) => 50 + 50*(2/(1+Math.exp(-k*Math.max(-3000,Math.min(3000,cp))))-1);
+// Chess.com's expected-points curve depends on rating; this is an approximation (flatter for lower ratings).
+const kFor = c => { const e = +S.elo[c]; return e ? 0.00368208*(0.6+0.4*(Math.max(600,Math.min(2500,e))-600)/1900) : 0.00368208; };
 
 function isSacrifice(fenBefore, mv){
   if(mv.piece==="p"||mv.piece==="k") return false;
@@ -255,11 +257,11 @@ function classifyAll(){
   S.cls = []; S.loss = [];
   moves.forEach((mv,i)=>{
     const m = mv.color==="w" ? 1 : -1;
-    const winB = win(m*ev[i].cp), winA = win(m*ev[i+1].cp);
+    const k = kFor(mv.color), winB = win(m*ev[i].cp,k), winA = win(m*ev[i+1].cp,k);
     const loss = Math.max(0, winB - winA);
     const isBest = (mv.from+mv.to+(mv.promotion||""))===ev[i].best;
     let c;
-    if(isBest || loss<=0.5) c="best";
+    if(isBest || loss<=0.1) c="best";
     else if(loss<2) c="excellent";
     else if(loss<5) c="good";
     else if(loss<10) c="inaccuracy";
@@ -268,7 +270,7 @@ function classifyAll(){
     if(i>0 && S.loss[i-1]>=10 && loss>=5 && (c==="inaccuracy"||c==="mistake")) c="miss";
     if(c==="best"||c==="excellent"){
       if(winA>=45 && winB<92 && isSacrifice(fens[i],mv)) c="brilliant";
-      else if(isBest && ev[i].cp2!==null && winB-win(m*ev[i].cp2)>=12 && winB<90) c="great";
+      else if(isBest && ((ev[i].cp2!==null && winB-win(m*ev[i].cp2,k)>=12 && winB<90) || (i>0 && S.loss[i-1]>=15 && winB<92))) c="great";
     }
     S.cls.push(c); S.loss.push(isBest?0:loss);
   });
