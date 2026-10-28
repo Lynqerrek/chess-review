@@ -3,7 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Game Review</title>
+<title>Free Game Review – analyze your chess games</title>
+<meta name="description" content="Free chess game review: upload a PGN or load your recent games and get every move rated, with explanations, powered by Stockfish.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%E2%99%9E%3C/text%3E%3C/svg%3E">
 <style>
 :root{
   --bg:#302e2b; --panel:#262522; --panel2:#211f1c; --line:#3d3a37; --text:#fff; --mute:#a7a6a2;
@@ -112,23 +114,35 @@ td.z{color:#6b6965;font-weight:400}
 @media(prefers-reduced-motion:reduce){.bd,#arrow g{animation:none}}
 .hd{display:flex;gap:6px;align-items:center}
 .hd select{padding:5px 6px;font-size:12px;border-radius:5px}
+#user{background:#45423e;border:0;border-radius:6px;padding:9px 10px;color:#fff;font:inherit;width:150px}
+footer{margin:18px auto 0;max-width:560px;text-align:center;color:#7d7b77;font-size:11.5px}
+.key{display:flex;flex-wrap:wrap;gap:6px;padding:10px 14px 0}
+.chip{background:#3a3835;border-radius:14px;padding:3px 10px 3px 4px;font-size:12px;cursor:pointer}
+.chip:hover{background:#4b4845}
+.chip .ic{margin-right:4px}
 @media(max-width:860px){#review{grid-template-columns:1fr}.left{width:100%}}
 </style>
 </head>
 <body>
 <div class="app">
   <section id="load">
-    <h1>♞ Game Review</h1>
-    <p>Upload a PGN and get every move rated, from brilliant to blunder.</p>
+    <h1>♞ Free Game Review</h1>
+    <p>Get every move rated, from brilliant to blunder, with explanations. Free, no sign-up, and the analysis runs on your own device.</p>
+    <div class="row" id="imp" style="margin:0 0 14px">
+      <select id="site" aria-label="Site"><option value="chesscom">Chess.com</option><option value="lichess">Lichess</option></select>
+      <input id="user" placeholder="Username" aria-label="Username" autocomplete="off">
+      <button class="btn" id="loadgames">Load recent games</button>
+    </div>
     <div id="drop"><b>Drop your .pgn file here</b>or <label><input type="file" id="file" accept=".pgn,.txt">choose a file</label></div>
     <textarea id="paste" placeholder="Or paste PGN text here"></textarea>
     <select id="games" aria-label="Choose game" style="display:none;margin-top:12px;width:100%"></select>
     <div class="row">
       <select id="depth" aria-label="Engine depth">
-        <option value="8">Depth 8 · very fast</option>
-        <option value="10">Depth 10 · fast</option>
-        <option value="12" selected>Depth 12 · balanced</option>
-        <option value="14">Depth 14 · thorough</option>
+        <option value="10">Depth 10 · quick</option>
+        <option value="12">Depth 12 · fast</option>
+        <option value="14" selected>Depth 14 · balanced</option>
+        <option value="16">Depth 16 · deep</option>
+        <option value="18">Depth 18 · very deep</option>
       </select>
       <button class="btn green" id="go">Start review</button>
     </div>
@@ -148,12 +162,13 @@ td.z{color:#6b6965;font-weight:400}
       </div>
     </div>
     <div class="side">
-      <div class="sh"><span>Game Review</span><span class="hd"><select id="theme" aria-label="Board theme"><option value="green">Green</option><option value="brown">Brown</option><option value="blue">Blue</option><option value="gray">Gray</option></select><button class="btn" id="snd" title="Sound">🔊</button><button class="btn" id="newgame">New game</button></span></div>
+      <div class="sh"><span>Game Review</span><span class="hd"><select id="theme" aria-label="Board theme"><option value="green">Green</option><option value="brown">Brown</option><option value="blue">Blue</option><option value="gray">Gray</option></select><button class="btn" id="newgame">New game</button></span></div>
       <div class="acc" id="acc"></div>
       <div class="opening" id="opening"></div>
       <div class="coach" id="coach"></div>
       <div class="line" id="line"></div>
       <svg id="graph" viewBox="0 0 300 64" preserveAspectRatio="none"></svg>
+      <div class="key" id="key"></div>
       <table id="summary"></table>
       <div id="moves"></div>
       <div class="nav">
@@ -163,11 +178,14 @@ td.z{color:#6b6965;font-weight:400}
       </div>
     </div>
   </section>
+  <footer>Not affiliated with chess.com or Lichess. Analysis by Stockfish (GPL-3.0). Chess logic by chess.js. Pieces: "cburnett" set by Colin M.L. Burnett.</footer>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
 <script>
 const SF_URL = "https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.js";
+const SF19_JS = "https://cdn.jsdelivr.net/npm/stockfish@19.0.1/bin/stockfish-19-lite-single.js";
+const SF19_WASM = "https://cdn.jsdelivr.net/npm/stockfish@19.0.1/bin/stockfish-19-lite-single.wasm";
 const PIECE_URL = "https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/piece/cburnett/";
 const CLS = {
   brilliant:{label:"Brilliant",sym:"!!",col:"var(--brilliant)",is:"a brilliant move"},
@@ -187,22 +205,33 @@ const START = {p:8,n:2,b:2,r:2,q:1};
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
-let pool = [], sfSrc = null, run = 0;
+let pool = [], sfSrc = null, newSrc = null, engineName = "", run = 0;
 let S = {fens:[],moves:[],ev:[],cls:[],loss:[],idx:0,flip:false,acc:{w:0,b:0},name:{w:"White",b:"Black"},elo:{w:"",b:""}};
 
 /* ---------- engine ---------- */
+const withTimeout = (p,ms) => Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),ms))]);
+async function startPool(src,wasm,n){
+  const url = URL.createObjectURL(new Blob([src],{type:"text/javascript"})) + (wasm ? "#"+encodeURIComponent(wasm) : "");
+  const ws = Array.from({length:n},()=>new Worker(url));
+  try{
+    await withTimeout(Promise.all(ws.map(async w=>{
+      await cmd(w,"uci","uciok");
+      w.postMessage("setoption name MultiPV value 1");
+      await cmd(w,"isready","readyok");
+    })),15000);
+  }catch(e){ ws.forEach(w=>w.terminate()); throw e; }
+  return ws;
+}
 async function initEngine(){
   pool.forEach(w=>w.terminate()); pool = [];
-  if(!sfSrc) sfSrc = await (await fetch(SF_URL)).text();
-  const url = URL.createObjectURL(new Blob([sfSrc],{type:"text/javascript"}));
   const n = Math.max(1, Math.min(8, (navigator.hardwareConcurrency||4)-1));
-  const ws = Array.from({length:n},()=>new Worker(url));
-  await Promise.all(ws.map(async w=>{
-    await cmd(w,"uci","uciok");
-    w.postMessage("setoption name MultiPV value 1");
-    await cmd(w,"isready","readyok");
-  }));
-  pool = ws;
+  try{
+    if(!newSrc) newSrc = await (await fetch(SF19_JS)).text();
+    pool = await startPool(newSrc,SF19_WASM,n); engineName = "Stockfish 19";
+  }catch(e){
+    if(!sfSrc) sfSrc = await (await fetch(SF_URL)).text();
+    pool = await startPool(sfSrc,null,n); engineName = "Stockfish 10 (compatibility mode)";
+  }
 }
 function cmd(w,c,until){
   return new Promise(res=>{
@@ -301,13 +330,13 @@ async function analyze(){
   try{ status("Loading Stockfish…"); progress(0); await initEngine(); }
   catch(e){ status("Couldn't load the engine. This page needs an internet connection to download Stockfish.",true); progress(null); $("go").disabled=false; return; }
   if(token!==run) return;
-  const depth = +$("depth").value, ev = new Array(fens.length);
+  const depth = engineName.startsWith("Stockfish 19") ? +$("depth").value : Math.min(12,+$("depth").value), ev = new Array(fens.length);
   let done = 0, total = fens.length;
-  const tick = () => { done++; status(`Reviewing position ${Math.min(done,total)} of ${total} (${pool.length} engine threads)…`); progress(Math.min(1,done/total)); };
+  const tick = () => { done++; status(`Reviewing position ${Math.min(done,total)} of ${total} (${engineName}, ${pool.length} threads)…`); progress(Math.min(1,done/total)); };
   const runPool = async (n,fn) => { let next = 0; await Promise.all(pool.map(async w=>{ while(token===run){ const j = next++; if(j>=n) return; await fn(w,j); tick(); } })); };
   pool.forEach(w=>w.postMessage("ucinewgame"));
   await runPool(fens.length, async (w,i) => {
-    const key = "sf1:"+depth+":"+fens[i]; let c = null;
+    const key = "sf2:"+engineName.slice(10,12)+":"+depth+":"+fens[i]; let c = null;
     try{ c = JSON.parse(localStorage.getItem(key)); }catch(e){}
     if(c){ ev[i] = c; return; }
     ev[i] = await evalPos(w,fens[i],depth);
@@ -327,7 +356,7 @@ async function analyze(){
        opening:hdr.Opening||"", name:{w:hdr.White||"White",b:hdr.Black||"Black"}, elo:{w:hdr.WhiteElo||"",b:hdr.BlackElo||""}};
   classifyAll();
   $("load").hidden = true; $("review").hidden = false;
-  buildSummary(); buildMoves(); buildGraph(); show(0);
+  buildSummary(); buildMoves(); buildGraph(); buildKey(); show(0);
   status(""); progress(null); $("go").disabled = false;
 }
 
@@ -368,6 +397,12 @@ function buildMoves(){
   }
   $("moves").innerHTML = h;
 }
+function buildKey(){
+  const sc = i => S.cls[i]==="brilliant"?50:S.cls[i]==="great"?30:S.loss[i];
+  const ids = S.moves.map((m,i)=>i).filter(i=>sc(i)>=12).sort((x,y)=>sc(y)-sc(x)||x-y).slice(0,6).sort((x,y)=>x-y);
+  $("key").innerHTML = ids.length ? `<div style="width:100%;color:var(--mute);font-size:12px">KEY MOMENTS</div>` +
+    ids.map(i=>`<span class="chip" data-i="${i+1}">${ic(S.cls[i])}${Math.floor(i/2)+1}${S.moves[i].color==="w"?".":"..."} ${esc(S.moves[i].san)}</span>`).join("") : "";
+}
 function buildGraph(){
   const n = S.fens.length-1, X = i => i/n*300, Y = cp => 64-win(cp)*0.64;
   const pts = S.ev.map((e,i)=>`${X(i).toFixed(1)},${Y(e.cp).toFixed(1)}`);
@@ -404,11 +439,29 @@ function arrowSvg(uci, flip){
 const PN = {p:"pawn",n:"knight",b:"bishop",r:"rook",q:"queen",k:"king"};
 const mateIn = cp => Math.max(1,Math.round((10000-Math.abs(cp))/10));
 function tryMove(fen,u){ if(!u) return null; return new Chess(fen).move({from:u.slice(0,2),to:u.slice(2,4),promotion:u[4]}); }
+function describe(m,i){
+  if(!m) return "";
+  if(m.san.includes("#")) return "delivers checkmate";
+  if(m.captured) return `takes the ${PN[m.captured]}`;
+  if(m.flags.includes("k")||m.flags.includes("q")) return "castles";
+  if(m.promotion) return `promotes to a ${PN[m.promotion]}`;
+  if(m.san.includes("+")) return "gives check";
+  if(m.piece==="n"||m.piece==="b") return (i<20?"develops":"improves")+` the ${PN[m.piece]}`;
+  return "";
+}
+function swing(bm,am){
+  const wb = win(bm), wa = win(am);
+  if(wb>=65 && wa<55) return "That gives up most of your advantage.";
+  if(wb>=40 && wa<30) return "That leaves you in a worse position.";
+  if(wb<40) return "That makes a difficult position harder.";
+  return "";
+}
 function explain(i){
   const mv = S.moves[i], c = S.cls[i], b = S.ev[i], a = S.ev[i+1], m = mv.color==="w"?1:-1, out = [];
   if(new Chess(S.fens[i+1]).in_checkmate()) return "Checkmate!";
+  const bm = tryMove(S.fens[i],b.best);
   if(["inaccuracy","mistake","miss","blunder"].includes(c)){
-    const bm = tryMove(S.fens[i],b.best), rep = tryMove(S.fens[i+1],a.best);
+    const rep = tryMove(S.fens[i+1],a.best);
     if(m*a.cp<=-9000) out.push(`This allows checkmate in ${mateIn(a.cp)}.`);
     else if(m*b.cp>=9000) out.push(`You had a forced mate in ${mateIn(b.cp)} and missed it.`);
     else if(rep && rep.captured){
@@ -417,17 +470,19 @@ function explain(i){
       if(!recapture || VAL[rep.captured]-VAL[rep.piece]>=2) out.push(`${rep.san} wins your ${PN[rep.captured]}.`);
     }
     if(!out.length && bm && bm.captured && !mv.captured && VAL[bm.captured]>=3) out.push(`${bm.san} would have won a ${PN[bm.captured]}.`);
+    if(c==="miss") out.push("Your opponent just slipped, and this lets them off the hook.");
+    const sw = swing(m*b.cp,m*a.cp); if(sw) out.push(sw);
     if(!out.length) out.push(`The evaluation dropped from ${fmt(b.cp)} to ${fmt(a.cp)}.`);
-    return out.slice(0,2).join(" ");
+    if(i<14 && mv.piece==="q") out.push("Bringing the queen out early often costs time.");
+    return out.slice(0,3).join(" ");
   }
   if(c==="brilliant") out.push("A real piece sacrifice, and the engine confirms it works.");
   else if(c==="great") out.push(i>0&&S.loss[i-1]>=15 ? "Punishes your opponent's mistake." : "The only move that keeps your position in order.");
+  const d = describe(mv,i);
   if(mv.captured) out.push(`Captures the ${PN[mv.captured]}.`);
-  else if(mv.flags.includes("k")||mv.flags.includes("q")) out.push("Castles to bring the king to safety.");
-  else if(mv.promotion) out.push(`Promotes to a ${PN[mv.promotion]}.`);
-  else if(mv.san.includes("+")) out.push("Gives check.");
-  else if(i<20 && (mv.piece==="n"||mv.piece==="b")) out.push(`Develops the ${PN[mv.piece]}.`);
+  else if(d) out.push(d[0].toUpperCase()+d.slice(1)+".");
   else if(c==="best") out.push("The engine's top choice.");
+  if((c==="good"||c==="excellent") && bm && bm.san!==mv.san) out.push(`${bm.san} was a touch stronger.`);
   return out.slice(0,2).join(" ");
 }
 const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -470,7 +525,6 @@ function show(i){
   }
   $("board").innerHTML = h;
   animateMove(prev,S.idx);
-  if(prev!==undefined && Math.abs(S.idx-prev)===1) moveSound(S.moves[Math.min(S.idx,prev)]);
   $("pTop").innerHTML = playerBar(S.flip?"w":"b",fen);
   $("pBot").innerHTML = playerBar(S.flip?"b":"w",fen);
 
@@ -481,12 +535,12 @@ function show(i){
     `<em class="${winnerWhite===whiteBottom?"bot":"top"}${winnerWhite?"":" onDark"}">${Math.abs(e.cp)>=9000?"M":Math.abs(e.cp/100).toFixed(1)}</em>`;
 
   // best-move arrow for weak moves
-  let best = null, bestSan = "";
+  let best = null, bestSan = "", bestDesc = "";
   if(mv){
     const before = S.ev[S.idx-1];
     if(["inaccuracy","mistake","miss","blunder"].includes(c) && before.best){
       const t = new Chess(S.fens[S.idx-1]), bm = t.move({from:before.best.slice(0,2),to:before.best.slice(2,4),promotion:before.best[4]});
-      if(bm){ best = before.best; bestSan = bm.san; }
+      if(bm){ best = before.best; bestSan = bm.san; bestDesc = describe(bm,S.idx-1); }
     }
   }
   $("arrow").innerHTML = best ? arrowSvg(best,S.flip) : "";
@@ -494,7 +548,7 @@ function show(i){
   if(!mv){
     $("coach").innerHTML = `<span class="big">♞</span><div><div class="t">Review ready</div><div class="s">Step through with ← → or click any move.</div></div><span class="pill">${fmt(e.cp)}</span>`;
   } else {
-    const sub = [esc(explain(S.idx-1)), best ? `Best was <b>${esc(bestSan)}</b>.` : ""].filter(Boolean).join(" ");
+    const sub = [esc(explain(S.idx-1)), best ? `Best was <b>${esc(bestSan)}</b>${bestDesc?", which "+bestDesc:""}.` : ""].filter(Boolean).join(" ");
     $("coach").innerHTML = `<span class="big" style="background:${CLS[c].col}">${CLS[c].sym}</span><div><div class="t">${esc(mv.san)} is ${CLS[c].is}</div><div class="s">${sub}</div></div><span class="pill">${fmt(e.cp)}</span>`;
   }
   $("line").innerHTML = e.pv && e.pv.length ? `<b style="color:#fff">${fmt(e.cp)}</b>  ${esc(lineSan(fen,e.pv))}` : "";
@@ -529,22 +583,6 @@ function togglePlay(){
 }
 $("play").onclick = togglePlay;
 $("paste").oninput = refreshGames;
-let AC = null, soundOn = true;
-function tone(f,d,type="triangle",v=.15){
-  if(!soundOn) return;
-  try{
-    AC = AC || new (window.AudioContext||window.webkitAudioContext)();
-    const o = AC.createOscillator(), g = AC.createGain(), t = AC.currentTime;
-    o.type = type; o.frequency.value = f; g.gain.setValueAtTime(v,t); g.gain.exponentialRampToValueAtTime(.001,t+d);
-    o.connect(g); g.connect(AC.destination); o.start(t); o.stop(t+d);
-  }catch(e){}
-}
-function moveSound(m){
-  if(m.san.includes("#")){ tone(330,.25); setTimeout(()=>tone(220,.35),120); }
-  else if(m.san.includes("+")) tone(520,.12,"square",.08);
-  else if(m.captured) tone(180,.12,"sawtooth",.12);
-  else tone(260,.06,"triangle",.2);
-}
 const THEMES = {green:["#ebecd0","#739552","#f5f682","#b9ca43"],brown:["#f0d9b5","#b58863","#f7ec74","#dbc34a"],blue:["#dee3e6","#788fa5","#bcd5f0","#8fb1d8"],gray:["#e0e0e0","#8a8a8a","#f4efa0","#c8c27a"]};
 function setTheme(n){
   const t = THEMES[n]||THEMES.green, r = document.documentElement.style;
@@ -553,11 +591,36 @@ function setTheme(n){
   try{ localStorage.setItem("theme",n); }catch(e){}
 }
 $("theme").onchange = e => setTheme(e.target.value);
-$("snd").onclick = () => { soundOn = !soundOn; $("snd").textContent = soundOn?"🔊":"🔇"; };
 (function(){ let n = "green"; try{ n = localStorage.getItem("theme")||"green"; }catch(e){} setTheme(n); })();
+async function loadGames(){
+  const u = $("user").value.trim(); if(!u){ status("Enter a username first.",true); return; }
+  status("Loading games…");
+  try{
+    let txt = "";
+    if($("site").value==="lichess"){
+      const r = await fetch(`https://lichess.org/api/games/user/${encodeURIComponent(u)}?max=10`,{headers:{Accept:"application/x-chess-pgn"}});
+      if(!r.ok) throw new Error("nf"); txt = await r.text();
+    } else {
+      const a = await (await fetch(`https://api.chess.com/pub/player/${encodeURIComponent(u.toLowerCase())}/games/archives`)).json();
+      const list = a.archives||[], out = [];
+      for(let k=list.length-1;k>=0 && out.length<10;k--){
+        const g = await (await fetch(list[k])).json();
+        for(const x of (g.games||[]).reverse()){ if(x.pgn) out.push(x.pgn); if(out.length>=10) break; }
+      }
+      txt = out.join("\n\n");
+    }
+    $("paste").value = txt; refreshGames();
+    const n = splitGames(txt).length;
+    if(!n) throw new Error("none");
+    status(`Loaded ${n} recent game${n>1?"s":""}. Pick one in the list below, then press Start review.`);
+  }catch(e){ status("Couldn't load games for that username. Check the spelling and your connection.",true); }
+}
+$("loadgames").onclick = loadGames;
+$("user").onkeydown = e => { if(e.key==="Enter") loadGames(); };
 /* ---------- events ---------- */
 $("go").onclick = analyze;
 $("newgame").onclick = () => { if(timer) togglePlay(); run++; $("go").disabled=false; progress(null); $("review").hidden = true; $("load").hidden = false; $("paste").value = ""; status(""); };
+$("key").onclick = e => { const t = e.target.closest(".chip"); if(t) show(+t.dataset.i); };
 $("first").onclick = ()=>show(0);
 $("prev").onclick = ()=>show(S.idx-1);
 $("next").onclick = ()=>show(S.idx+1);
