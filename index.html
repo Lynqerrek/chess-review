@@ -151,11 +151,12 @@ footer{margin:18px auto 0;max-width:560px;text-align:center;color:#7d7b77;font-s
     <select id="games" aria-label="Choose game" style="display:none;margin-top:12px;width:100%"></select>
     <div class="row">
       <select id="depth" aria-label="Engine depth">
-        <option value="10">Depth 10 · quick</option>
-        <option value="12">Depth 12 · fast</option>
-        <option value="14" selected>Depth 14 · balanced</option>
-        <option value="16">Depth 16 · deep</option>
-        <option value="18">Depth 18 · very deep</option>
+        <option value="12">Depth 12 · quick</option>
+        <option value="14">Depth 14 · fast</option>
+        <option value="16">Depth 16 · balanced</option>
+        <option value="18" selected>Depth 18 · deep (recommended)</option>
+        <option value="20">Depth 20 · very deep</option>
+        <option value="24">Depth 24 · maximum</option>
       </select>
       <button class="btn green" id="go">Start review</button>
     </div>
@@ -399,8 +400,8 @@ async function analyze(){
   catch(e){ status("Couldn't load the engine. This page needs an internet connection to download Stockfish.",true); progress(null); $("go").disabled=false; return; }
   if(token!==run) return;
   const depth = engineName.startsWith("Stockfish 19") ? +$("depth").value : Math.min(12,+$("depth").value), ev = new Array(fens.length);
-  let done = 0, total = fens.length;
-  const tick = () => { done++; status(`Reviewing position ${Math.min(done,total)} of ${total} (${engineName}, ${pool.length} threads)…`); progress(Math.min(1,done/total)); };
+  let done = 0, total = fens.length, phase = "Reviewing position";
+  const tick = () => { done++; status(`${phase} ${Math.min(done,total)} of ${total} (${engineName}, ${pool.length} threads)…`); progress(Math.min(1,done/total)); };
   const runPool = async (n,fn) => { let next = 0; await Promise.all(pool.map(async w=>{ while(token===run){ const j = next++; if(j>=n) return; await fn(w,j); tick(); } })); };
   pool.forEach(w=>w.postMessage("ucinewgame"));
   await runPool(fens.length, async (w,i) => {
@@ -424,8 +425,20 @@ async function analyze(){
   S = {fens,moves:hist,ev,cls:[],loss:[],idx:0,flip:false,acc:{w:0,b:0},
        book:bi.book, openAt:bi.openAt, theory:bi.theory, opening:hdr.Opening||"", name:{w:hdr.White||"White",b:hdr.Black||"Black"}, elo:{w:hdr.WhiteElo||"",b:hdr.BlackElo||""}};
   classifyAll();
+  const sus = new Set();
+  S.moves.forEach((m,i)=>{ if(["inaccuracy","mistake","miss","blunder"].includes(S.cls[i])){ sus.add(i); sus.add(i+1); } });
+  if(sus.size){
+    const list = [...sus], dd = engineName.startsWith("Stockfish 19") ? Math.min(depth+6,28) : Math.min(depth+2,14);
+    total += list.length; phase = "Double-checking suspicious moves, position";
+    await runPool(list.length, async (w,j) => {
+      const i = list[j], r = await evalPos(w,fens[i],dd);
+      r.cp2 = ev[i].cp2 ?? null; ev[i] = r;
+    });
+    if(token!==run) return;
+    classifyAll();
+  }
   $("load").hidden = true; $("review").hidden = false;
-  live.w = pool[0]; live.depth = engineName.startsWith("Stockfish 19") ? 16 : 10;
+  live.w = pool[0]; live.depth = engineName.startsWith("Stockfish 19") ? 18 : 10;
   live.w.onmessage = liveMsg; live.w.postMessage("setoption name MultiPV value 3");
   buildSummary(); buildMoves(); buildGraph(); buildKey(); show(0);
   status(""); progress(null); $("go").disabled = false;
