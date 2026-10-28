@@ -104,7 +104,11 @@ td.z{color:#6b6965;font-weight:400}
 .nav button:hover{background:#524f4a}
 .av{width:28px;height:28px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;flex:none}
 .mv img{width:17px;height:17px;vertical-align:-4px}
-.line{padding:0 14px 10px;color:var(--mute);font-size:12.5px;min-height:1.9em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.line{padding:0 14px 10px;min-height:2.2em}
+.ln{display:flex;gap:8px;align-items:center;color:var(--mute);font-size:12.5px;padding:2px 0;white-space:nowrap}
+.ln b{flex:none;min-width:54px;text-align:center;border-radius:4px;padding:1px 6px}
+.ln b.pw{background:#fff;color:#262522}.ln b.pb{background:#403d39;color:#fff}
+.ln span{overflow:hidden;text-overflow:ellipsis}
 .opening{padding:0 14px;color:var(--mute);font-size:12px}
 .opening:empty{display:none}
 @keyframes pop{from{transform:scale(0)}60%{transform:scale(1.2)}to{transform:scale(1)}}
@@ -180,7 +184,7 @@ footer{margin:18px auto 0;max-width:560px;text-align:center;color:#7d7b77;font-s
       </div>
     </div>
   </section>
-  <footer>Not affiliated with chess.com or Lichess. Analysis by Stockfish (GPL-3.0). Chess logic by chess.js. Pieces: "cburnett" set by Colin M.L. Burnett.</footer>
+  <footer>Not affiliated with chess.com or Lichess. Analysis by Stockfish (GPL-3.0). Chess logic by chess.js. Pieces: "cburnett" set by Colin M.L. Burnett. Opening names: Lichess chess-openings (CC0).</footer>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
@@ -195,6 +199,7 @@ const CLS = {
   best:{label:"Best",sym:"★",col:"var(--best)",is:"the best move"},
   excellent:{label:"Excellent",sym:"👍",col:"var(--excellent)",is:"an excellent move"},
   good:{label:"Good",sym:"✓",col:"var(--good)",is:"a good move"},
+  book:{label:"Book",sym:"📖",col:"#a88865",is:"a book move"},
   inaccuracy:{label:"Inaccuracy",sym:"?!",col:"var(--inaccuracy)",is:"an inaccuracy"},
   mistake:{label:"Mistake",sym:"?",col:"var(--mistake)",is:"a mistake"},
   miss:{label:"Miss",sym:"✕",col:"#ff7769",is:"a miss"},
@@ -264,6 +269,41 @@ function evalPos(w,fen,depth,exclude){
   });
 }
 
+/* ---------- openings (Lichess chess-openings, CC0) ---------- */
+let OPEN = null;
+async function getText(u){ const r = await fetch(u); if(!r.ok) throw new Error("http"); return r.text(); }
+async function loadOpenings(){
+  if(OPEN) return OPEN;
+  try{
+    const norm = t => t.replace(/\d+\.(\.\.)?/g," ").replace(/[+#]/g,"").trim().split(/\s+/);
+    const texts = await Promise.all("abcde".split("").map(l =>
+      getText(`https://cdn.jsdelivr.net/gh/lichess-org/chess-openings@master/${l}.tsv`)
+        .catch(()=>getText(`https://raw.githubusercontent.com/lichess-org/chess-openings/master/${l}.tsv`))));
+    const names = new Map(), prefixes = new Set();
+    for(const t of texts) for(const line of t.split("\n").slice(1)){
+      const [eco,name,pgn] = line.split("\t"); if(!pgn) continue;
+      const toks = norm(pgn);
+      for(let k=1;k<=toks.length;k++) prefixes.add(toks.slice(0,k).join(" "));
+      names.set(toks.join(" "),{eco,name});
+    }
+    OPEN = {names,prefixes};
+    return OPEN;
+  }catch(e){ return {names:new Map(),prefixes:new Set()}; }
+}
+function bookInfo(hist,fen0,O){
+  const n = hist.length, openAt = new Array(n+1).fill("");
+  if(!O || fen0) return {book:0,openAt};
+  const toks = hist.map(m=>m.san.replace(/[+#]/g,""));
+  let book = 0, cur = "", ok = true;
+  for(let k=1;k<=n;k++){
+    if(ok){
+      const key = toks.slice(0,k).join(" ");
+      if(O.prefixes.has(key)){ book = k; const nm = O.names.get(key); if(nm) cur = `${nm.name} (${nm.eco})`; } else ok = false;
+    }
+    openAt[k] = cur;
+  }
+  return {book,openAt};
+}
 /* ---------- classification ---------- */
 const win = (cp,k=0.00368208) => 50 + 50*(2/(1+Math.exp(-k*Math.max(-3000,Math.min(3000,cp))))-1);
 // Chess.com's expected-points curve depends on rating; this is an approximation (flatter for lower ratings).
@@ -305,7 +345,8 @@ function classifyAll(){
       if(winA>=45 && winB<92 && isSacrifice(fens[i],mv)) c="brilliant";
       else if(isBest && ((ev[i].cp2!==null && winB-win(m*ev[i].cp2,k)>=12 && winB<90) || (i>0 && S.loss[i-1]>=15 && winB<92))) c="great";
     }
-    S.cls.push(c); S.loss.push(isBest?0:loss);
+    if(i<S.book) c = "book";
+    S.cls.push(c); S.loss.push(isBest||c==="book"?0:loss);
   });
   const a = {w:[],b:[]};
   moves.forEach((mv,i)=>a[mv.color].push(Math.max(0,Math.min(100,103.1668*Math.exp(-0.04354*S.loss[i])-3.1669))));
@@ -329,6 +370,8 @@ async function analyze(){
   const fens = [r.fen()];
   hist.forEach(m=>{ r.move({from:m.from,to:m.to,promotion:m.promotion}); fens.push(r.fen()); });
   $("go").disabled = true;
+  live.w = null; live.busy = false; live.pending = null;
+  const openP = loadOpenings();
   try{ status("Loading Stockfish…"); progress(0); await initEngine(); }
   catch(e){ status("Couldn't load the engine. This page needs an internet connection to download Stockfish.",true); progress(null); $("go").disabled=false; return; }
   if(token!==run) return;
@@ -354,10 +397,13 @@ async function analyze(){
     ev[i].cp2 = others.length ? (await evalPos(w,fens[i],Math.max(6,depth-2),others)).cp : null;
   });
   if(token!==run) return;
+  const bi = bookInfo(hist,hdr.FEN,await openP);
   S = {fens,moves:hist,ev,cls:[],loss:[],idx:0,flip:false,acc:{w:0,b:0},
-       opening:hdr.Opening||"", name:{w:hdr.White||"White",b:hdr.Black||"Black"}, elo:{w:hdr.WhiteElo||"",b:hdr.BlackElo||""}};
+       book:bi.book, openAt:bi.openAt, opening:hdr.Opening||"", name:{w:hdr.White||"White",b:hdr.Black||"Black"}, elo:{w:hdr.WhiteElo||"",b:hdr.BlackElo||""}};
   classifyAll();
   $("load").hidden = true; $("review").hidden = false;
+  live.w = pool[0]; live.depth = engineName.startsWith("Stockfish 19") ? 16 : 10;
+  live.w.onmessage = liveMsg; live.w.postMessage("setoption name MultiPV value 3");
   buildSummary(); buildMoves(); buildGraph(); buildKey(); show(0);
   status(""); progress(null); $("go").disabled = false;
 }
@@ -461,6 +507,7 @@ function swing(bm,am){
 function explain(i){
   const mv = S.moves[i], c = S.cls[i], b = S.ev[i], a = S.ev[i+1], m = mv.color==="w"?1:-1, out = [];
   if(new Chess(S.fens[i+1]).in_checkmate()) return "Checkmate!";
+  if(c==="book") return S.openAt[i+1] ? "Opening theory: "+S.openAt[i+1]+"." : "A standard opening move.";
   const bm = tryMove(S.fens[i],b.best);
   if(["inaccuracy","mistake","miss","blunder"].includes(c)){
     const rep = tryMove(S.fens[i+1],a.best);
@@ -510,6 +557,34 @@ function animateMove(prev,idx){
     g.animate([{opacity:1},{opacity:0}],{duration:230,fill:"forwards"}).onfinish = () => g.remove();
   }
 }
+const live = {w:null,busy:false,pending:null,fen:"",cur:"",lines:{},sign:1,depth:14};
+function fmtLines(fen,lines){
+  return [1,2,3].filter(k=>lines[k]).map(k=>`<div class="ln"><b class="${lines[k].cp>=0?"pw":"pb"}">${fmt(lines[k].cp)}</b><span>${esc(lineSan(fen,lines[k].pv,8))}</span></div>`).join("");
+}
+function showLines(fen){
+  live.cur = fen;
+  if(new Chess(fen).game_over()){ $("line").innerHTML = ""; return; }
+  const e = S.ev[S.idx];
+  $("line").innerHTML = e && e.pv && e.pv.length ? fmtLines(fen,{1:{cp:e.cp,pv:e.pv}}) : "";
+  if(live.w) liveAnalyze(fen);
+}
+function liveAnalyze(fen){ live.pending = fen; if(live.busy){ live.w.postMessage("stop"); return; } startLive(); }
+function startLive(){
+  const fen = live.pending; if(!fen) return;
+  live.pending = null; live.busy = true; live.fen = fen; live.lines = {};
+  live.sign = fen.split(" ")[1]==="w" ? 1 : -1;
+  live.w.postMessage("position fen "+fen); live.w.postMessage("go depth "+live.depth);
+}
+function liveMsg(e){
+  const t = typeof e.data==="string" ? e.data : "";
+  if(t.startsWith("info") && t.includes(" pv ")){
+    if(live.pending) return;
+    const mp = +((t.match(/multipv (\d+)/)||[0,1])[1]), m = t.match(/score (cp|mate) (-?\d+)/); if(!m) return;
+    let v = +m[2]; if(m[1]==="mate") v = Math.sign(v)*(10000-Math.abs(v)*10);
+    live.lines[mp] = {cp:v*live.sign, pv:t.split(" pv ")[1].trim().split(" ")};
+    if(live.fen===live.cur) $("line").innerHTML = fmtLines(live.fen,live.lines);
+  } else if(t.startsWith("bestmove")){ live.busy = false; if(live.pending) startLive(); }
+}
 function show(i){
   const prev = S.shown;
   S.idx = Math.max(0,Math.min(S.fens.length-1,i));
@@ -553,7 +628,8 @@ function show(i){
     const sub = [esc(explain(S.idx-1)), best ? `Best was <b>${esc(bestSan)}</b>${bestDesc?", which "+bestDesc:""}.` : ""].filter(Boolean).join(" ");
     $("coach").innerHTML = `<span class="big" style="background:${CLS[c].col}">${CLS[c].sym}</span><div><div class="t">${esc(mv.san)} is ${CLS[c].is}</div><div class="s">${sub}</div></div><span class="pill">${fmt(e.cp)}</span>`;
   }
-  $("line").innerHTML = e.pv && e.pv.length ? `<b style="color:#fff">${fmt(e.cp)}</b>  ${esc(lineSan(fen,e.pv))}` : "";
+  $("opening").textContent = (S.openAt && S.openAt[S.idx]) || S.opening || "";
+  showLines(fen);
   document.querySelectorAll(".mv").forEach(el=>el.classList.toggle("cur",+el.dataset.i===S.idx));
   const cur = document.querySelector(".mv.cur"); if(cur) cur.scrollIntoView({block:"nearest"});
   const cl = $("cur"); if(cl){ const x = S.idx/(S.fens.length-1)*300; cl.setAttribute("x1",x); cl.setAttribute("x2",x); }
