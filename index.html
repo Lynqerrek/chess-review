@@ -8,20 +8,20 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%E2%99%9E%3C/text%3E%3C/svg%3E">
 <style>
 :root{
-  --bs:576px; --bg:#302e2b; --panel:#262522; --panel2:#211f1c; --line:#3d3a37; --text:#fff; --mute:#a7a6a2;
-  --green:#81b64c; --lt:#ebecd0; --dk:#739552; --hlL:#f5f682; --hlD:#b9ca43;
+  --bs:704px; --sw:680px; --bg:#302e2b; --panel:#262522; --panel2:#211f1c; --line:#3d3a37; --text:#fff; --mute:#a7a6a2;
+  --green:#81b64c; --green-d:#5d8a35; --lt:#ebecd0; --dk:#739552; --hlL:#f5f682; --hlD:#b9ca43;
   --brilliant:#1baca6; --great:#5c8bb0; --best:#96bc4b; --excellent:#96bc4b; --good:#96af8b;
   --inaccuracy:#f7c631; --mistake:#ffa459; --blunder:#fa412d;
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 "Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+body{margin:0;background:radial-gradient(1400px 700px at 25% -15%,rgba(255,255,255,.06),transparent 70%),var(--bg);background-attachment:fixed;color:var(--text);font:14px/1.4 "Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
 .app{max-width:1120px;margin:0 auto;padding:16px}
 button,select{font:inherit;color:var(--text);cursor:pointer}
 :focus-visible{outline:2px solid var(--great);outline-offset:2px}
 .btn{background:#45423e;border:0;border-bottom:3px solid #2f2d2a;border-radius:6px;padding:9px 14px;font-weight:700}
 .btn:hover{background:#524f4a}
-.btn.green{background:var(--green);border-bottom-color:#5d8a35}
-.btn.green:hover{background:#95c25e}
+.btn.green{background:var(--green);border-bottom-color:var(--green-d)}
+.btn.green:hover{filter:brightness(1.12)}
 .btn:disabled{opacity:.5;cursor:default}
 
 /* landing */
@@ -42,7 +42,7 @@ select{background:#45423e;border:0;border-radius:6px;padding:9px 10px}
 #bar i{display:block;height:100%;width:0;background:var(--green);transition:width .2s}
 
 /* review layout */
-#review{display:grid;grid-template-columns:calc(var(--bs) + 28px) 380px;gap:16px;justify-content:center;align-items:start}
+#review{display:grid;grid-template-columns:calc(var(--bs) + 28px) var(--sw);gap:16px;justify-content:center;align-items:start}
 #review[hidden]{display:none}
 .left{width:calc(var(--bs) + 28px)}
 .left .nav{margin:10px 0 0 28px;padding:0;background:transparent}
@@ -59,10 +59,10 @@ select{background:#45423e;border:0;border-radius:6px;padding:9px 10px}
 .pbar .cap{display:flex;align-items:center;margin-left:4px}
 .pbar .cap img{width:16px;height:16px;margin-right:-6px}
 .pbar .md{color:var(--mute);font-size:12px;margin-left:10px}
-#boardwrap{position:relative;aspect-ratio:1;border-radius:4px;overflow:hidden}
+#boardwrap{position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;box-shadow:0 10px 34px rgba(0,0,0,.5),0 0 0 5px rgba(255,255,255,.05)}
 #board{position:absolute;inset:0;display:grid;grid-template-columns:repeat(8,1fr);user-select:none}
 .sq{position:relative;container-type:size}
-.sq.l{background:var(--lt)}.sq.d{background:var(--dk)}
+.sq.l{background:var(--lt) linear-gradient(135deg,rgba(255,255,255,.2),rgba(255,255,255,0) 55%)}.sq.d{background:var(--dk) linear-gradient(135deg,rgba(255,255,255,.1),rgba(0,0,0,.1))}
 .sq.l.hl{background:var(--hlL)}.sq.d.hl{background:var(--hlD)}
 .sq img,.sq .fbk{position:absolute;inset:0;width:100%;height:100%;z-index:1}
 .sq .fbk{display:flex;align-items:center;justify-content:center;font-size:80cqw}
@@ -74,7 +74,9 @@ select{background:#45423e;border:0;border-radius:6px;padding:9px 10px}
 
 /* sidebar */
 .side{background:var(--panel);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;height:calc(var(--bs) + 114px)}
-.sbody{flex:1;min-height:0;overflow-y:auto}
+.sbody{flex:1;min-height:0;overflow-y:auto;display:grid;grid-template-columns:1fr 1fr;align-items:start}
+.c1,.c2{min-width:0}
+.c2{border-left:1px solid var(--line)}
 .sh{flex:none}
 .sh{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--panel2);font-size:17px;font-weight:800}
 .sh .btn{padding:5px 10px;font-size:12px;border-bottom-width:2px}
@@ -94,9 +96,9 @@ td{padding:3px 0}
 td.n{text-align:right;width:46px;font-weight:700}
 td.z{color:#6b6965;font-weight:400}
 .ic{display:inline-block;width:18px;height:18px;border-radius:50%;color:#fff;font:800 10px/18px sans-serif;text-align:center;vertical-align:middle;margin-right:7px}
-#moves{max-height:210px;overflow:auto;margin-top:8px;border-top:1px solid var(--line)}
+#moves{max-height:300px;overflow:auto;margin-top:8px;border-top:1px solid var(--line)}
 .mrow{display:grid;grid-template-columns:40px 1fr 1fr;align-items:center}
-.mrow:nth-child(odd){background:#2b2926}
+.mrow:nth-child(odd){background:rgba(0,0,0,.16)}
 .mrow .no{color:var(--mute);font-size:12px;padding-left:10px}
 .mv{padding:5px 6px;cursor:pointer;font-weight:600;white-space:nowrap}
 .mv:hover{background:#3a3835}
@@ -128,7 +130,9 @@ footer{margin:18px auto 0;max-width:560px;text-align:center;color:#7d7b77;font-s
 .chip:hover{background:#4b4845}
 .chip .ic{margin-right:4px}
 .chk{color:var(--mute);font-size:13px;display:flex;align-items:center;gap:5px;cursor:pointer}
-@media(max-width:1090px){:root{--bs:min(576px,calc(100vw - 64px))}#review{grid-template-columns:calc(var(--bs) + 28px)}.side{height:auto}.sbody{overflow:visible}}
+@media(max-width:1480px),(max-height:900px){:root{--bs:576px;--sw:620px}}
+@media(max-height:720px){:root{--bs:480px;--sw:600px}}
+@media(max-width:1260px){:root{--bs:min(576px,calc(100vw - 64px))}#review{grid-template-columns:calc(var(--bs) + 28px)}.side{height:auto}.sbody{display:block;overflow:visible}.c2{border-left:0}}
 </style>
 </head>
 <body>
@@ -176,20 +180,21 @@ footer{margin:18px auto 0;max-width:560px;text-align:center;color:#7d7b77;font-s
       </div>
     </div>
     <div class="side">
-      <div class="sh"><span>Game Review</span><span class="hd"><select id="theme" aria-label="Board theme"><option value="green">Green</option><option value="brown">Brown</option><option value="blue">Blue</option><option value="gray">Gray</option></select><button class="btn" id="newgame">New game</button></span></div>
-      <div class="sbody">
+      <div class="sh"><span>Game Review</span><span class="hd"><select id="theme" aria-label="Board theme"><option value="green">Classic Green</option><option value="brown">Walnut</option><option value="blue">Ocean</option><option value="gray">Slate</option><option value="midnight">Midnight</option><option value="rose">Sunset</option></select><button class="btn" id="newgame">New game</button></span></div>
+      <div class="sbody"><div class="c1">
       <div class="acc" id="acc"></div>
       <div class="opening" id="opening"></div>
       <div class="coach" id="coach"></div>
       <div class="line" id="line"></div>
       <svg id="graph" viewBox="0 0 300 64" preserveAspectRatio="none"></svg>
       <div class="key" id="key"></div>
+      </div><div class="c2">
       <table id="summary"></table>
       <div id="moves"></div>
-      </div>
+      </div></div>
     </div>
   </section>
-  <footer>Not affiliated with chess.com or Lichess. Analysis by Stockfish (GPL-3.0). Chess logic by chess.js. Pieces: "cburnett" set by Colin M.L. Burnett. Opening names: Lichess chess-openings (CC0).</footer>
+  <footer>Not affiliated with chess.com or Lichess. Analysis by Stockfish (GPL-3.0). Chess logic by chess.js. Pieces: "cburnett" set by Colin M.L. Burnett. Opening names: Lichess chess-openings (CC0).<br><span id="dbinfo"></span></footer>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
@@ -288,7 +293,8 @@ async function loadOpenings(){
       const bin = Uint8Array.from(atob(OPEN_B64), c=>c.charCodeAt(0));
       texts = [await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream("gzip"))).text()];
     }catch(e){ texts = null; }
-    if(!texts){
+    let src = "built into this file";
+    if(!texts){ src = "downloaded";
       texts = await Promise.all("abcde".split("").map(l =>
         getText(`https://cdn.jsdelivr.net/gh/lichess-org/chess-openings@master/${l}.tsv`)
           .catch(()=>getText(`https://raw.githubusercontent.com/lichess-org/chess-openings/master/${l}.tsv`))));
@@ -302,7 +308,7 @@ async function loadOpenings(){
       for(let k=0;k<toks.length;k++){ const key = toks.slice(0,k).join(" "); if(!next.has(key)) next.set(key,new Set()); next.get(key).add(toks[k]); }
       names.set(toks.join(" "),{eco,name});
     }
-    OPEN = {names,prefixes,next};
+    OPEN = {names,prefixes,next,src};
     return OPEN;
   }catch(e){ return {names:new Map(),prefixes:new Set(),next:new Map()}; }
 }
@@ -689,10 +695,17 @@ function togglePlay(){
 }
 $("play").onclick = togglePlay;
 $("paste").oninput = refreshGames;
-const THEMES = {green:["#ebecd0","#739552","#f5f682","#b9ca43"],brown:["#f0d9b5","#b58863","#f7ec74","#dbc34a"],blue:["#dee3e6","#788fa5","#bcd5f0","#8fb1d8"],gray:["#e0e0e0","#8a8a8a","#f4efa0","#c8c27a"]};
+const THEMES = {
+  green:["#ebecd0","#739552","#f5f682","#b9ca43","#302e2b","#262522","#211f1c","#81b64c","#5d8a35"],
+  brown:["#f0d9b5","#b58863","#f7ec74","#dbc34a","#2e2520","#3a2d26","#2a201b","#d9a05b","#a8733a"],
+  blue:["#dfe9f2","#5b86ad","#bfe0ff","#78b3ee","#14212e","#1b2d3f","#142333","#4aa3df","#2f78a8"],
+  gray:["#e4e6ea","#7c8796","#f1e9a8","#c3bd7d","#23272e","#2b3038","#22262c","#9aa7b8","#6e7b8d"],
+  midnight:["#c9c6e8","#5a4f9a","#e9d36b","#b59f3d","#14111f","#1d1830","#151126","#9b7bff","#6a4fd0"],
+  rose:["#f6e0d8","#c0617a","#ffe9a0","#e0b84e","#261620","#34202b","#281821","#ff7a90","#c9475d"]
+};
 function setTheme(n){
   const t = THEMES[n]||THEMES.green, r = document.documentElement.style;
-  ["--lt","--dk","--hlL","--hlD"].forEach((v,i)=>r.setProperty(v,t[i]));
+  ["--lt","--dk","--hlL","--hlD","--bg","--panel","--panel2","--green","--green-d"].forEach((v,i)=>r.setProperty(v,t[i]));
   $("theme").value = THEMES[n]?n:"green";
   try{ localStorage.setItem("theme",n); }catch(e){}
 }
@@ -752,6 +765,7 @@ const drop = $("drop");
 ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("over");}));
 ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("over");}));
 drop.addEventListener("drop",e=>readFile(e.dataTransfer.files[0]));
+loadOpenings().then(O=>{ $("dbinfo").textContent = O.names.size ? `Opening database: ${O.names.size.toLocaleString()} openings (${O.src || "downloaded"})` : "Opening database unavailable"; });
 </script>
 </body>
 </html>
