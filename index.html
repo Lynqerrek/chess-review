@@ -120,6 +120,7 @@ footer{margin:18px auto 0;max-width:560px;text-align:center;color:#7d7b77;font-s
 .chip{background:#3a3835;border-radius:14px;padding:3px 10px 3px 4px;font-size:12px;cursor:pointer}
 .chip:hover{background:#4b4845}
 .chip .ic{margin-right:4px}
+.chk{color:var(--mute);font-size:13px;display:flex;align-items:center;gap:5px;cursor:pointer}
 @media(max-width:860px){#review{grid-template-columns:1fr}.left{width:100%}}
 </style>
 </head>
@@ -132,6 +133,7 @@ footer{margin:18px auto 0;max-width:560px;text-align:center;color:#7d7b77;font-s
       <select id="site" aria-label="Site"><option value="chesscom">Chess.com</option><option value="lichess">Lichess</option></select>
       <input id="user" placeholder="Username" aria-label="Username" autocomplete="off">
       <button class="btn" id="loadgames">Load recent games</button>
+      <label class="chk"><input type="checkbox" id="ratedOnly" checked> Rated games only</label>
     </div>
     <div id="drop"><b>Drop your .pgn file here</b>or <label><input type="file" id="file" accept=".pgn,.txt">choose a file</label></div>
     <textarea id="paste" placeholder="Or paste PGN text here"></textarea>
@@ -571,7 +573,11 @@ function splitGames(t){ return t.trim().split(/\n\s*\n(?=\[Event )/).filter(x=>x
 function refreshGames(){
   const gs = splitGames($("paste").value), sel = $("games");
   if(gs.length<2){ sel.style.display="none"; sel.innerHTML=""; return; }
-  sel.innerHTML = gs.map((g,i)=>{ const w=(g.match(/\[White "([^"]*)"/)||[])[1]||"?", b=(g.match(/\[Black "([^"]*)"/)||[])[1]||"?"; return `<option value="${i}">Game ${i+1}: ${esc(w)} vs ${esc(b)}</option>`; }).join("");
+  sel.innerHTML = gs.map((g,i)=>{
+    const tag = k => (g.match(new RegExp("\\["+k+" \"([^\"]*)\""))||[])[1]||"";
+    const d = (tag("Date")||tag("UTCDate")).replace(/\./g,"-");
+    return `<option value="${i}">${i+1}. ${esc(tag("White")||"?")} vs ${esc(tag("Black")||"?")} · ${esc(tag("Result"))}${d?" · "+esc(d):""}</option>`;
+  }).join("");
   sel.style.display = "block";
 }
 let timer = null;
@@ -598,20 +604,20 @@ async function loadGames(){
   try{
     let txt = "";
     if($("site").value==="lichess"){
-      const r = await fetch(`https://lichess.org/api/games/user/${encodeURIComponent(u)}?max=10`,{headers:{Accept:"application/x-chess-pgn"}});
+      const r = await fetch(`https://lichess.org/api/games/user/${encodeURIComponent(u)}?max=30${$("ratedOnly").checked?"&rated=true":""}`,{headers:{Accept:"application/x-chess-pgn"}});
       if(!r.ok) throw new Error("nf"); txt = await r.text();
     } else {
       const a = await (await fetch(`https://api.chess.com/pub/player/${encodeURIComponent(u.toLowerCase())}/games/archives`)).json();
       const list = a.archives||[], out = [];
-      for(let k=list.length-1;k>=0 && out.length<10;k--){
+      for(let k=list.length-1;k>=0 && out.length<30;k--){
         const g = await (await fetch(list[k])).json();
-        for(const x of (g.games||[]).reverse()){ if(x.pgn) out.push(x.pgn); if(out.length>=10) break; }
+        for(const x of (g.games||[]).reverse()){ if(x.pgn && (!$("ratedOnly").checked || x.rated)) out.push(x.pgn); if(out.length>=30) break; }
       }
       txt = out.join("\n\n");
     }
     $("paste").value = txt; refreshGames();
     const n = splitGames(txt).length;
-    if(!n) throw new Error("none");
+    if(!n){ status("No games found. If you mostly play bots or unrated games, untick \"Rated games only\".",true); return; }
     status(`Loaded ${n} recent game${n>1?"s":""}. Pick one in the list below, then press Start review.`);
   }catch(e){ status("Couldn't load games for that username. Check the spelling and your connection.",true); }
 }
