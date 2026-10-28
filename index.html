@@ -110,6 +110,8 @@ td.z{color:#6b6965;font-weight:400}
 .bd{animation:pop .28s .12s cubic-bezier(.2,.8,.3,1) both}
 #arrow g{animation:fade .25s .1s both}
 @media(prefers-reduced-motion:reduce){.bd,#arrow g{animation:none}}
+.hd{display:flex;gap:6px;align-items:center}
+.hd select{padding:5px 6px;font-size:12px;border-radius:5px}
 @media(max-width:860px){#review{grid-template-columns:1fr}.left{width:100%}}
 </style>
 </head>
@@ -146,7 +148,7 @@ td.z{color:#6b6965;font-weight:400}
       </div>
     </div>
     <div class="side">
-      <div class="sh">Game Review <button class="btn" id="newgame">New game</button></div>
+      <div class="sh"><span>Game Review</span><span class="hd"><select id="theme" aria-label="Board theme"><option value="green">Green</option><option value="brown">Brown</option><option value="blue">Blue</option><option value="gray">Gray</option></select><button class="btn" id="snd" title="Sound">🔊</button><button class="btn" id="newgame">New game</button></span></div>
       <div class="acc" id="acc"></div>
       <div class="opening" id="opening"></div>
       <div class="coach" id="coach"></div>
@@ -197,7 +199,7 @@ async function initEngine(){
   const ws = Array.from({length:n},()=>new Worker(url));
   await Promise.all(ws.map(async w=>{
     await cmd(w,"uci","uciok");
-    w.postMessage("setoption name MultiPV value 2");
+    w.postMessage("setoption name MultiPV value 1");
     await cmd(w,"isready","readyok");
   }));
   pool = ws;
@@ -208,7 +210,7 @@ function cmd(w,c,until){
     w.postMessage(c);
   });
 }
-function evalPos(w,fen,depth){
+function evalPos(w,fen,depth,exclude){
   const c = new Chess(fen);
   if(c.game_over()) return Promise.resolve({cp: c.in_checkmate() ? (c.turn()==="w"?-10000:10000) : 0, best:null, cp2:null});
   const sign = c.turn()==="w" ? 1 : -1;
@@ -227,7 +229,7 @@ function evalPos(w,fen,depth){
       }
     };
     w.postMessage("position fen "+fen);
-    w.postMessage("go depth "+depth);
+    w.postMessage("go depth "+depth+(exclude&&exclude.length?" searchmoves "+exclude.join(" "):""));
   });
 }
 
@@ -300,15 +302,26 @@ async function analyze(){
   catch(e){ status("Couldn't load the engine. This page needs an internet connection to download Stockfish.",true); progress(null); $("go").disabled=false; return; }
   if(token!==run) return;
   const depth = +$("depth").value, ev = new Array(fens.length);
-  let next = 0, done = 0;
-  await Promise.all(pool.map(async w=>{
-    w.postMessage("ucinewgame");
-    while(token===run){
-      const i = next++; if(i>=fens.length) return;
-      ev[i] = await evalPos(w,fens[i],depth);
-      done++; status(`Reviewing position ${done} of ${fens.length} (${pool.length} engine threads)…`); progress(done/fens.length);
-    }
-  }));
+  let done = 0, total = fens.length;
+  const tick = () => { done++; status(`Reviewing position ${Math.min(done,total)} of ${total} (${pool.length} engine threads)…`); progress(Math.min(1,done/total)); };
+  const runPool = async (n,fn) => { let next = 0; await Promise.all(pool.map(async w=>{ while(token===run){ const j = next++; if(j>=n) return; await fn(w,j); tick(); } })); };
+  pool.forEach(w=>w.postMessage("ucinewgame"));
+  await runPool(fens.length, async (w,i) => {
+    const key = "sf1:"+depth+":"+fens[i]; let c = null;
+    try{ c = JSON.parse(localStorage.getItem(key)); }catch(e){}
+    if(c){ ev[i] = c; return; }
+    ev[i] = await evalPos(w,fens[i],depth);
+    try{ localStorage.setItem(key,JSON.stringify(ev[i])); }catch(e){}
+  });
+  if(token!==run) return;
+  const cand = [];
+  hist.forEach((mv,i)=>{ const wb = win((mv.color==="w"?1:-1)*ev[i].cp); if(i>=4 && wb>5 && wb<90 && ev[i].best===mv.from+mv.to+(mv.promotion||"")) cand.push(i); });
+  total += cand.length;
+  await runPool(cand.length, async (w,j) => {
+    const i = cand[j], best = ev[i].best;
+    const others = new Chess(fens[i]).moves({verbose:true}).map(x=>x.from+x.to+(x.promotion||"")).filter(x=>x!==best);
+    ev[i].cp2 = others.length ? (await evalPos(w,fens[i],Math.max(6,depth-2),others)).cp : null;
+  });
   if(token!==run) return;
   S = {fens,moves:hist,ev,cls:[],loss:[],idx:0,flip:false,acc:{w:0,b:0},
        opening:hdr.Opening||"", name:{w:hdr.White||"White",b:hdr.Black||"Black"}, elo:{w:hdr.WhiteElo||"",b:hdr.BlackElo||""}};
@@ -324,14 +337,26 @@ function fmt(cp){ return Math.abs(cp)>=9000 ? (cp>0?"+":"-")+"M"+Math.round((100
 function fb(img){ const s=document.createElement("span"); s.className="fbk"; s.textContent=img.alt; img.replaceWith(s); }
 const pimg = (color,t,cls="") => `<img ${cls} src="${PIECE_URL}${color}${t.toUpperCase()}.svg" alt="${GLYPH[t]}" draggable="false" onerror="fb(this)">`;
 
+function phaseRows(){
+  const b = {};
+  S.moves.forEach((mv,i)=>{
+    let mat = 0; for(const ch of S.fens[i].split(" ")[0]){ const l = ch.toLowerCase(); if("nbrq".includes(l) && /[a-z]/i.test(ch)) mat += VAL[l]; }
+    const ph = i<20 ? "Opening" : mat<=26 ? "Endgame" : "Middlegame";
+    const a = Math.max(0,Math.min(100,103.1668*Math.exp(-0.04354*S.loss[i])-3.1669));
+    (b[ph] = b[ph]||{w:[],b:[]})[mv.color].push(a);
+  });
+  const avg = x => x.length ? Math.round(x.reduce((p,q)=>p+q,0)/x.length) : "–";
+  return `<tr><td colspan="3" style="padding-top:12px;color:var(--mute);font-size:12px">ACCURACY BY PHASE</td></tr>` +
+    ["Opening","Middlegame","Endgame"].filter(k=>b[k]).map(k=>`<tr><td>${k}</td><td class="n">${avg(b[k].w)}</td><td class="n">${avg(b[k].b)}</td></tr>`).join("");
+}
 function buildSummary(){
   const cnt = {w:{},b:{}};
   ORDER.forEach(k=>{cnt.w[k]=0;cnt.b[k]=0;});
   S.moves.forEach((m,i)=>cnt[m.color][S.cls[i]]++);
-  $("summary").innerHTML = ORDER.map(k=>{
+  $("summary").innerHTML = `<tr><td></td><td class="n" style="color:var(--mute);font-size:12px">White</td><td class="n" style="color:var(--mute);font-size:12px">Black</td></tr>` + ORDER.map(k=>{
     const cell = n => `<td class="n${n?"":" z"}" ${n?`style="color:${CLS[k].col}"`:""}>${n}</td>`;
     return `<tr><td>${ic(k)}${CLS[k].label}</td>${cell(cnt.w[k])}${cell(cnt.b[k])}</tr>`;
-  }).join("");
+  }).join("") + phaseRows();
   $("opening").textContent = S.opening||"";
   $("acc").innerHTML = `<div class="aw"><small>${esc(S.name.w)}</small><b>${S.acc.w.toFixed(1)}</b></div><div class="ab"><small>${esc(S.name.b)}</small><b>${S.acc.b.toFixed(1)}</b></div>`;
 }
@@ -376,6 +401,35 @@ function arrowSvg(uci, flip){
   return `<g fill="#96bc4b" stroke="#96bc4b" opacity=".9"><line x1="${a.x}" y1="${a.y}" x2="${bx}" y2="${by}" stroke-width=".17" stroke-linecap="round"/><polygon stroke="none" points="${b.x},${b.y} ${bx-uy*hw},${by+ux*hw} ${bx+uy*hw},${by-ux*hw}"/></g>`;
 }
 
+const PN = {p:"pawn",n:"knight",b:"bishop",r:"rook",q:"queen",k:"king"};
+const mateIn = cp => Math.max(1,Math.round((10000-Math.abs(cp))/10));
+function tryMove(fen,u){ if(!u) return null; return new Chess(fen).move({from:u.slice(0,2),to:u.slice(2,4),promotion:u[4]}); }
+function explain(i){
+  const mv = S.moves[i], c = S.cls[i], b = S.ev[i], a = S.ev[i+1], m = mv.color==="w"?1:-1, out = [];
+  if(new Chess(S.fens[i+1]).in_checkmate()) return "Checkmate!";
+  if(["inaccuracy","mistake","miss","blunder"].includes(c)){
+    const bm = tryMove(S.fens[i],b.best), rep = tryMove(S.fens[i+1],a.best);
+    if(m*a.cp<=-9000) out.push(`This allows checkmate in ${mateIn(a.cp)}.`);
+    else if(m*b.cp>=9000) out.push(`You had a forced mate in ${mateIn(b.cp)} and missed it.`);
+    else if(rep && rep.captured){
+      const t = new Chess(S.fens[i+1]); t.move({from:rep.from,to:rep.to,promotion:rep.promotion});
+      const recapture = t.moves({verbose:true}).some(x=>x.to===rep.to && x.captured);
+      if(!recapture || VAL[rep.captured]-VAL[rep.piece]>=2) out.push(`${rep.san} wins your ${PN[rep.captured]}.`);
+    }
+    if(!out.length && bm && bm.captured && !mv.captured && VAL[bm.captured]>=3) out.push(`${bm.san} would have won a ${PN[bm.captured]}.`);
+    if(!out.length) out.push(`The evaluation dropped from ${fmt(b.cp)} to ${fmt(a.cp)}.`);
+    return out.slice(0,2).join(" ");
+  }
+  if(c==="brilliant") out.push("A real piece sacrifice, and the engine confirms it works.");
+  else if(c==="great") out.push(i>0&&S.loss[i-1]>=15 ? "Punishes your opponent's mistake." : "The only move that keeps your position in order.");
+  if(mv.captured) out.push(`Captures the ${PN[mv.captured]}.`);
+  else if(mv.flags.includes("k")||mv.flags.includes("q")) out.push("Castles to bring the king to safety.");
+  else if(mv.promotion) out.push(`Promotes to a ${PN[mv.promotion]}.`);
+  else if(mv.san.includes("+")) out.push("Gives check.");
+  else if(i<20 && (mv.piece==="n"||mv.piece==="b")) out.push(`Develops the ${PN[mv.piece]}.`);
+  else if(c==="best") out.push("The engine's top choice.");
+  return out.slice(0,2).join(" ");
+}
 const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
 function sqPos(sq){ const f="abcdefgh".indexOf(sq[0]), r=+sq[1]; return {c:S.flip?7-f:f, r:S.flip?r-1:8-r}; }
 function slide(to,from){
@@ -416,6 +470,7 @@ function show(i){
   }
   $("board").innerHTML = h;
   animateMove(prev,S.idx);
+  if(prev!==undefined && Math.abs(S.idx-prev)===1) moveSound(S.moves[Math.min(S.idx,prev)]);
   $("pTop").innerHTML = playerBar(S.flip?"w":"b",fen);
   $("pBot").innerHTML = playerBar(S.flip?"b":"w",fen);
 
@@ -439,7 +494,7 @@ function show(i){
   if(!mv){
     $("coach").innerHTML = `<span class="big">♞</span><div><div class="t">Review ready</div><div class="s">Step through with ← → or click any move.</div></div><span class="pill">${fmt(e.cp)}</span>`;
   } else {
-    const sub = best ? `Best was <b>${esc(bestSan)}</b>` : c==="brilliant" ? "A clever sacrifice that holds up." : c==="great" ? "The only move that keeps the position." : c==="best"?"The engine's top choice.":"";
+    const sub = [esc(explain(S.idx-1)), best ? `Best was <b>${esc(bestSan)}</b>.` : ""].filter(Boolean).join(" ");
     $("coach").innerHTML = `<span class="big" style="background:${CLS[c].col}">${CLS[c].sym}</span><div><div class="t">${esc(mv.san)} is ${CLS[c].is}</div><div class="s">${sub}</div></div><span class="pill">${fmt(e.cp)}</span>`;
   }
   $("line").innerHTML = e.pv && e.pv.length ? `<b style="color:#fff">${fmt(e.cp)}</b>  ${esc(lineSan(fen,e.pv))}` : "";
@@ -474,6 +529,32 @@ function togglePlay(){
 }
 $("play").onclick = togglePlay;
 $("paste").oninput = refreshGames;
+let AC = null, soundOn = true;
+function tone(f,d,type="triangle",v=.15){
+  if(!soundOn) return;
+  try{
+    AC = AC || new (window.AudioContext||window.webkitAudioContext)();
+    const o = AC.createOscillator(), g = AC.createGain(), t = AC.currentTime;
+    o.type = type; o.frequency.value = f; g.gain.setValueAtTime(v,t); g.gain.exponentialRampToValueAtTime(.001,t+d);
+    o.connect(g); g.connect(AC.destination); o.start(t); o.stop(t+d);
+  }catch(e){}
+}
+function moveSound(m){
+  if(m.san.includes("#")){ tone(330,.25); setTimeout(()=>tone(220,.35),120); }
+  else if(m.san.includes("+")) tone(520,.12,"square",.08);
+  else if(m.captured) tone(180,.12,"sawtooth",.12);
+  else tone(260,.06,"triangle",.2);
+}
+const THEMES = {green:["#ebecd0","#739552","#f5f682","#b9ca43"],brown:["#f0d9b5","#b58863","#f7ec74","#dbc34a"],blue:["#dee3e6","#788fa5","#bcd5f0","#8fb1d8"],gray:["#e0e0e0","#8a8a8a","#f4efa0","#c8c27a"]};
+function setTheme(n){
+  const t = THEMES[n]||THEMES.green, r = document.documentElement.style;
+  ["--lt","--dk","--hlL","--hlD"].forEach((v,i)=>r.setProperty(v,t[i]));
+  $("theme").value = THEMES[n]?n:"green";
+  try{ localStorage.setItem("theme",n); }catch(e){}
+}
+$("theme").onchange = e => setTheme(e.target.value);
+$("snd").onclick = () => { soundOn = !soundOn; $("snd").textContent = soundOn?"🔊":"🔇"; };
+(function(){ let n = "green"; try{ n = localStorage.getItem("theme")||"green"; }catch(e){} setTheme(n); })();
 /* ---------- events ---------- */
 $("go").onclick = analyze;
 $("newgame").onclick = () => { if(timer) togglePlay(); run++; $("go").disabled=false; progress(null); $("review").hidden = true; $("load").hidden = false; $("paste").value = ""; status(""); };
