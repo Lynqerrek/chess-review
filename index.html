@@ -119,8 +119,8 @@ td.z{color:#6b6965;font-weight:400}
 @keyframes pop{from{transform:scale(0)}60%{transform:scale(1.2)}to{transform:scale(1)}}
 @keyframes fade{from{opacity:0}to{opacity:.9}}
 .bd{animation:pop .28s .12s cubic-bezier(.2,.8,.3,1) both}
-#arrow g{animation:fade .25s .1s both}
-@media(prefers-reduced-motion:reduce){.bd,#arrow g{animation:none}}
+#arrow{filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))}
+@media(prefers-reduced-motion:reduce){.bd{animation:none}}
 .hd{display:flex;gap:6px;align-items:center}
 .hd select{padding:5px 6px;font-size:12px;border-radius:5px}
 #user{background:#45423e;border:0;border-radius:6px;padding:9px 10px;color:#fff;font:inherit;width:150px}
@@ -130,6 +130,10 @@ footer{margin:18px auto 0;max-width:560px;text-align:center;color:#7d7b77;font-s
 .chip:hover{background:#4b4845}
 .chip .ic{margin-right:4px}
 .chk{color:var(--mute);font-size:13px;display:flex;align-items:center;gap:5px;cursor:pointer}
+.dl{display:flex;align-items:center;gap:8px;color:var(--mute)}
+.dl b{color:#fff;min-width:2.2ch;text-align:right}
+input[type=range]{accent-color:var(--green);width:170px}
+.dh{color:var(--mute);font-size:12.5px}
 @media(max-width:1480px),(max-height:900px){:root{--bs:576px;--sw:620px}}
 @media(max-height:720px){:root{--bs:480px;--sw:600px}}
 @media(max-width:1260px){:root{--bs:min(576px,calc(100vw - 64px))}#review{grid-template-columns:calc(var(--bs) + 28px)}.side{height:auto}.sbody{display:block;overflow:visible}.c2{border-left:0}}
@@ -150,14 +154,8 @@ footer{margin:18px auto 0;max-width:560px;text-align:center;color:#7d7b77;font-s
     <textarea id="paste" placeholder="Or paste PGN text here"></textarea>
     <select id="games" aria-label="Choose game" style="display:none;margin-top:12px;width:100%"></select>
     <div class="row">
-      <select id="depth" aria-label="Engine depth">
-        <option value="12">Depth 12 · quick</option>
-        <option value="14">Depth 14 · fast</option>
-        <option value="16">Depth 16 · balanced</option>
-        <option value="18" selected>Depth 18 · deep (recommended)</option>
-        <option value="20">Depth 20 · very deep</option>
-        <option value="24">Depth 24 · maximum</option>
-      </select>
+      <label class="dl">Depth <b id="dval">18</b><input type="range" id="depth" min="8" max="100" value="18" step="1" aria-label="Engine depth"></label>
+      <span id="dhint" class="dh"></span>
       <button class="btn green" id="go">Start review</button>
     </div>
     <div id="status"></div>
@@ -181,7 +179,7 @@ footer{margin:18px auto 0;max-width:560px;text-align:center;color:#7d7b77;font-s
       </div>
     </div>
     <div class="side">
-      <div class="sh"><span>Game Review</span><span class="hd"><select id="theme" aria-label="Board theme"><option value="green">Classic Green</option><option value="brown">Walnut</option><option value="blue">Ocean</option><option value="gray">Slate</option><option value="midnight">Midnight</option><option value="rose">Sunset</option></select><button class="btn" id="newgame">New game</button></span></div>
+      <div class="sh"><span>Game Review</span><span class="hd"><select id="theme" aria-label="Board theme"><option value="green">Classic Green</option><option value="brown">Walnut</option><option value="blue">Ocean</option><option value="gray">Slate</option><option value="midnight">Midnight</option><option value="rose">Sunset</option></select><label class="chk" title="Show best-move and engine arrows"><input type="checkbox" id="arrowsOn" checked> Arrows</label><button class="btn" id="newgame">New game</button></span></div>
       <div class="sbody"><div class="c1">
       <div class="acc" id="acc"></div>
       <div class="opening" id="opening"></div>
@@ -276,7 +274,7 @@ function evalPos(w,fen,depth,exclude){
       }
     };
     w.postMessage("position fen "+fen);
-    w.postMessage("go depth "+depth+(exclude&&exclude.length?" searchmoves "+exclude.join(" "):""));
+    w.postMessage("go depth "+depth+(depth>24?" movetime 20000":"")+(exclude&&exclude.length?" searchmoves "+exclude.join(" "):""));
   });
 }
 
@@ -427,8 +425,9 @@ async function analyze(){
   classifyAll();
   const sus = new Set();
   S.moves.forEach((m,i)=>{ if(["inaccuracy","mistake","miss","blunder"].includes(S.cls[i])){ sus.add(i); sus.add(i+1); } });
-  if(sus.size){
-    const list = [...sus], dd = engineName.startsWith("Stockfish 19") ? Math.min(depth+6,28) : Math.min(depth+2,14);
+  const dd = engineName.startsWith("Stockfish 19") ? Math.min(depth+6,28) : Math.min(depth+2,14);
+  if(sus.size && dd>depth){
+    const list = [...sus];
     total += list.length; phase = "Double-checking suspicious moves, position";
     await runPool(list.length, async (w,j) => {
       const i = list[j], r = await evalPos(w,fens[i],dd);
@@ -512,12 +511,19 @@ function playerBar(color, fen){
   return `<span class="av" style="background:${color==="w"?"#8a8884":"#4a4845"}">${esc((S.name[color]||"?")[0].toUpperCase())}</span><span>${esc(S.name[color])}</span>${elo}<span class="cap">${caps}</span>${diff>0?`<span class="md">+${diff}</span>`:""}`;
 }
 
-function arrowSvg(uci, flip){
+function arrowSvg(uci, flip, col="#96bc4b", op=.9){
   const P = sq => ({x:(flip?7-"abcdefgh".indexOf(sq[0]):"abcdefgh".indexOf(sq[0]))+.5, y:(flip?+sq[1]-1:8-sq[1])+.5});
   const a = P(uci.slice(0,2)), b = P(uci.slice(2,4));
-  const dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy), ux=dx/L, uy=dy/L, hl=.42, hw=.3;
-  const bx=b.x-ux*hl, by=b.y-uy*hl;
-  return `<g fill="#96bc4b" stroke="#96bc4b" opacity=".9"><line x1="${a.x}" y1="${a.y}" x2="${bx}" y2="${by}" stroke-width=".17" stroke-linecap="round"/><polygon stroke="none" points="${b.x},${b.y} ${bx-uy*hw},${by+ux*hw} ${bx+uy*hw},${by-ux*hw}"/></g>`;
+  const dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy); if(!L) return "";
+  const ux=dx/L, uy=dy/L, hl=.45, hw=.32, bx=b.x-ux*hl, by=b.y-uy*hl;
+  return `<g fill="${col}" stroke="${col}" opacity="${op}"><line x1="${a.x}" y1="${a.y}" x2="${bx}" y2="${by}" stroke-width=".2" stroke-linecap="round"/><polygon stroke="none" points="${b.x},${b.y} ${bx-uy*hw},${by+ux*hw} ${bx+uy*hw},${by-ux*hw}"/></g>`;
+}
+function drawArrows(){
+  if(!$("arrowsOn").checked){ $("arrow").innerHTML = ""; return; }
+  let h = "";
+  if(live.fen===live.cur) for(const k of [3,2,1]){ const l = live.lines[k]; if(l && l.pv[0]) h += arrowSvg(l.pv[0],S.flip,"#5c8bb0",[0,.85,.55,.35][k]); }
+  if(S.bestArrow) h += arrowSvg(S.bestArrow,S.flip);
+  $("arrow").innerHTML = h;
 }
 
 const PN = {p:"pawn",n:"knight",b:"bishop",r:"rook",q:"queen",k:"king"};
@@ -623,7 +629,7 @@ function liveMsg(e){
     const mp = +((t.match(/multipv (\d+)/)||[0,1])[1]), m = t.match(/score (cp|mate) (-?\d+)/); if(!m) return;
     let v = +m[2]; if(m[1]==="mate") v = Math.sign(v)*(10000-Math.abs(v)*10);
     live.lines[mp] = {cp:v*live.sign, pv:t.split(" pv ")[1].trim().split(" ")};
-    if(live.fen===live.cur) $("line").innerHTML = fmtLines(live.fen,live.lines);
+    if(live.fen===live.cur){ $("line").innerHTML = fmtLines(live.fen,live.lines); drawArrows(); }
   } else if(t.startsWith("bestmove")){ live.busy = false; if(live.pending) startLive(); }
 }
 function show(i){
@@ -661,7 +667,10 @@ function show(i){
       if(bm){ best = before.best; bestSan = bm.san; bestDesc = describe(bm,S.idx-1); }
     }
   }
-  $("arrow").innerHTML = best ? arrowSvg(best,S.flip) : "";
+  const pu = mv ? mv.from+mv.to+(mv.promotion||"") : "";
+  S.bestArrow = best || ((mv && ["excellent","good"].includes(c) && S.ev[S.idx-1].best && S.ev[S.idx-1].best!==pu) ? S.ev[S.idx-1].best : null);
+  live.cur = fen;
+  drawArrows();
 
   if(!mv){
     $("coach").innerHTML = `<span class="big">♞</span><div><div class="t">Review ready</div><div class="s">Step through with ← → or click any move.</div></div><span class="pill">${fmt(e.cp)}</span>`;
@@ -750,9 +759,13 @@ async function loadGames(){
 $("loadgames").onclick = loadGames;
 $("user").onkeydown = e => { if(e.key==="Enter") loadGames(); };
 /* ---------- events ---------- */
+function depthHint(d){ return d<=12?"quick":d<=16?"fast":d<=20?"deep":d<=28?"very deep":"extreme (20 s limit per position)"; }
+$("depth").oninput = () => { $("dval").textContent = $("depth").value; $("dhint").textContent = depthHint(+$("depth").value); };
+$("depth").oninput();
 $("go").onclick = analyze;
 $("newgame").onclick = () => { if(timer) togglePlay(); run++; $("go").disabled=false; progress(null); $("review").hidden = true; $("load").hidden = false; $("paste").value = ""; status(""); };
 $("key").onclick = e => { const t = e.target.closest(".chip"); if(t) show(+t.dataset.i); };
+$("arrowsOn").onchange = () => drawArrows();
 $("first").onclick = ()=>show(0);
 $("prev").onclick = ()=>show(S.idx-1);
 $("next").onclick = ()=>show(S.idx+1);
@@ -770,7 +783,7 @@ document.addEventListener("keydown",e=>{
 function readFile(f){
   if(!f) return;
   const fr = new FileReader();
-  fr.onload = () => { $("paste").value = fr.result; refreshGames(); if(splitGames(fr.result).length>1) status("Several games found. Pick one, then press Start review."); else analyze(); };
+  fr.onload = () => { $("paste").value = fr.result; refreshGames(); const n = splitGames(fr.result).length; status(n>1 ? `Found ${n} games. Pick one, then press Start review.` : "File loaded. Press Start review when you're ready."); };
   fr.readAsText(f);
 }
 $("file").onchange = e => readFile(e.target.files[0]);
